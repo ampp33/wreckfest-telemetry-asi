@@ -14,6 +14,8 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
 endif()
 
+include(cmake/Dependencies.cmake)
+
 # ── Plugin DLL (Windows target only -- requires the MinGW toolchain file) ────
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
     add_library(wreckfest_telemetry SHARED
@@ -37,18 +39,18 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
         src/io/Config.cpp
         src/io/Queue.cpp
         src/net/HttpClient.cpp
-        third_party/lz4.c
+        ${DEPS_DIR}/lz4.c
     )
 
     target_include_directories(wreckfest_telemetry PRIVATE
         ${CMAKE_SOURCE_DIR}/src
     )
 
-    # nlohmann/json is vendored as a single header (MIT licensed; see
-    # third_party/README.md) so the build has no network/package-manager
-    # dependency. Marked SYSTEM to suppress warnings from code we don't own.
+    # json.hpp/lz4.{c,h} are fetched by cmake/Dependencies.cmake, not
+    # committed -- see that file. Marked SYSTEM to suppress warnings from
+    # code we don't own.
     target_include_directories(wreckfest_telemetry SYSTEM PRIVATE
-        ${CMAKE_SOURCE_DIR}/third_party
+        ${DEPS_DIR}
     )
 
     target_link_libraries(wreckfest_telemetry PRIVATE

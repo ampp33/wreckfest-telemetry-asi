@@ -14,6 +14,11 @@ history behind the struct offsets and detection logic this ports.
 
 Requires CMake 3.16+ and a C++20 compiler. Either way, output is `wreckfest_telemetry.asi`.
 
+CMake fetches two small dependencies (nlohmann/json, LZ4) on first configure, hash-pinned to a
+specific release each — see `cmake/Dependencies.cmake`. Needs network access once; cached under
+`build/_deps/` after that, so a `docker run` against a bind-mounted `build/` (below) only fetches
+once too. `rm -rf build` to force a re-fetch.
+
 ### Docker (recommended)
 
 No local toolchain needed beyond Docker itself.
