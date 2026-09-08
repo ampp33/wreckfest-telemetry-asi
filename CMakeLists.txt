@@ -21,6 +21,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
         src/worker/WorkerThread.cpp
         src/debug/DebugConsole.cpp
         src/io/PluginPaths.cpp
+        src/memory/SehGuard.cpp
+        src/memory/ProcessMemory.cpp
     )
 
     target_include_directories(wreckfest_telemetry PRIVATE
