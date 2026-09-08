@@ -47,6 +47,15 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
         )
     endif()
 
+    if(MINGW)
+        # Wreckfest's install dir won't have the MinGW runtime DLLs --
+        # statically link them in so the .asi has no dependency beyond
+        # standard Windows system DLLs.
+        target_link_options(wreckfest_telemetry PRIVATE
+            -static-libgcc -static-libstdc++ -static
+        )
+    endif()
+
     # Ultimate ASI Loader expects a plain DLL with a .asi extension.
     set_target_properties(wreckfest_telemetry PROPERTIES
         SUFFIX ".asi"

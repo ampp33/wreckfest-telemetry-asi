@@ -13,7 +13,7 @@ void WriteLoadedMarker(HMODULE hModule) {
     if (path.empty()) {
         return;
     }
-    std::wofstream out(path, std::ios::app);
+    std::wofstream out(path.c_str(), std::ios::app);
     if (!out) {
         return;
     }
