@@ -17,6 +17,7 @@
 #include "race/PlayerScraper.h"
 #include "strings/HashRegistry.h"
 #include "strings/TrackDetection.h"
+#include "tuning/SaveFileTuning.h"
 
 namespace wreckfest_telemetry {
 
@@ -152,6 +153,26 @@ void RunDebugLoop(HMODULE hModule) {
                           FormatLapTimes(player.lap_times_ms).c_str());
             if (out) out << line << "\n";
         }
+
+        for (const auto& player : ranked) {
+            if (!player.is_local || player.car.empty()) continue;
+            auto path = FindCars5Path();
+            if (out) {
+                out << "[debug] cars5.ccrs path: " << (path ? "FOUND" : "NOT FOUND") << "\n";
+            }
+            auto tuning = ReadTuningFromSave(player.car);
+            if (out) {
+                out << "[debug] save-file tuning for \"" << player.car << "\": ";
+                if (tuning.empty()) {
+                    out << "(none)";
+                } else {
+                    for (auto& [label, idx] : tuning) out << label << "=" << idx << " ";
+                }
+                out << "\n";
+            }
+            break;
+        }
+
         out.close();
         Sleep(2000);
     }

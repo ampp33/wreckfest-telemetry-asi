@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.16)
 project(wreckfest_telemetry_asi
     VERSION 0.1.0
     DESCRIPTION "ASI plugin: auto-loading native port of wreckfest-telemetry"
-    LANGUAGES CXX
+    LANGUAGES C CXX
 )
 
 set(CMAKE_CXX_STANDARD 20)
@@ -29,6 +29,10 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
         src/race/LapSplits.cpp
         src/strings/HashRegistry.cpp
         src/strings/TrackDetection.cpp
+        src/tuning/Lz4Block.cpp
+        src/tuning/SaveFileTuning.cpp
+        src/tuning/Cars5Path.cpp
+        third_party/lz4.c
     )
 
     target_include_directories(wreckfest_telemetry PRIVATE
@@ -44,6 +48,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
 
     target_link_libraries(wreckfest_telemetry PRIVATE
         winhttp
+        advapi32
     )
 
     if(MSVC)

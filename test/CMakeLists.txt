@@ -11,3 +11,18 @@
 add_executable(smoke_test smoke_test.cpp)
 target_compile_features(smoke_test PRIVATE cxx_std_20)
 add_test(NAME smoke_test COMMAND smoke_test)
+
+# Exercises the LZ4/cars5.ccrs pipeline against a real save file. Not run
+# via add_test (needs a real file + car name passed on the command line) --
+# invoke it directly, e.g.:
+#   ./cars5_tuning_test ~/.local/share/Steam/userdata/<id>/228380/local/wreckfest/cars5.ccrs "RoadSlayer"
+add_executable(cars5_tuning_test
+    cars5_tuning_test.cpp
+    native_stubs.cpp
+    ${CMAKE_SOURCE_DIR}/src/tuning/Lz4Block.cpp
+    ${CMAKE_SOURCE_DIR}/src/tuning/SaveFileTuning.cpp
+    ${CMAKE_SOURCE_DIR}/third_party/lz4.c
+)
+target_compile_features(cars5_tuning_test PRIVATE cxx_std_20)
+target_include_directories(cars5_tuning_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_include_directories(cars5_tuning_test SYSTEM PRIVATE ${CMAKE_SOURCE_DIR}/third_party)
