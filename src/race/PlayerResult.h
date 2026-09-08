@@ -47,4 +47,18 @@ inline char ClassFromRating(int rating) {
     return 'A';
 }
 
+inline const PlayerResult* FindLocalPlayer(const std::vector<PlayerResult>& players) {
+    for (const auto& p : players) {
+        if (p.is_local) return &p;
+    }
+    return nullptr;
+}
+
+inline PlayerResult* FindLocalPlayer(std::vector<PlayerResult>& players) {
+    for (auto& p : players) {
+        if (p.is_local) return &p;
+    }
+    return nullptr;
+}
+
 }  // namespace wreckfest_telemetry

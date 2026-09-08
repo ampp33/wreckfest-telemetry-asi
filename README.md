@@ -7,9 +7,8 @@ game starts — no PID hunting, no terminal.
 It reads race results, car/track/tuning data, and lap splits directly from the game's own memory
 (in-process, since it's loaded into the game itself), logs every finished race to
 `race_log.jsonl`, and optionally POSTs results to a configured backend with an offline retry
-queue. See `PROJECT.md`/`take-a-look-at-idempotent-cupcake.md` in the sibling
-`wreckfest-telemetry` repo for the full reverse-engineering history behind the struct offsets and
-detection logic this ports.
+queue. See `PROJECT.md` in the sibling `wreckfest-telemetry` repo for the full reverse-engineering
+history behind the struct offsets and detection logic this ports.
 
 ## Building
 
@@ -43,14 +42,20 @@ cmake -B build -DCMAKE_TOOLCHAIN_FILE=cmake/mingw-w64-x86_64.cmake -DCMAKE_BUILD
 cmake --build build
 ```
 
-### Host-side unit tests
+### Host-side tests
 
-Pure logic (LZ4/cars5.ccrs decompression), no Windows APIs or game needed — build and run
-natively on Linux:
+Pure logic (LZ4 round-trip, the cars5.ccrs byte-scanners), no Windows APIs or game needed — build
+and run natively on Linux:
 ```
 cmake -B build-host .
 cmake --build build-host
 ctest --test-dir build-host
+```
+
+`cars5_tuning_test` (built alongside, not run by `ctest`) exercises the same pipeline against a
+*real* `cars5.ccrs` and prints what it finds — useful for checking a save file by hand:
+```
+./build-host/test/cars5_tuning_test ~/.local/share/Steam/userdata/<id>/228380/local/wreckfest/cars5.ccrs "Car Name"
 ```
 
 ## Installing

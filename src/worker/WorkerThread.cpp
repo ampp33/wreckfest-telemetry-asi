@@ -29,13 +29,13 @@ namespace wreckfest_telemetry {
 namespace {
 
 constexpr double kFlushBackoffSeconds[] = {60.0, 120.0, 300.0, 900.0};
+constexpr double kPollIntervalSeconds = 0.5;
 
 // Widens an ASCII literal for DebugLog -- not for arbitrary UTF-8 content
 // (player/track names), just our own fixed debug strings.
 std::wstring WidenAscii(const std::string& s) {
     return std::wstring(s.begin(), s.end());
 }
-constexpr double kPollIntervalSeconds = 0.5;
 
 std::chrono::steady_clock::time_point SecondsFromNow(double seconds) {
     return std::chrono::steady_clock::now() +
@@ -54,13 +54,7 @@ void AppendMarker(HMODULE hModule, const std::wstring& line) {
 // straggler elsewhere in the field can't hold this "unstable" forever
 // (see RaceFinality.h and main()'s poll loop in the Python source).
 std::string ComputeFingerprint(const std::vector<PlayerResult>& players) {
-    const PlayerResult* local = nullptr;
-    for (const auto& p : players) {
-        if (p.is_local) {
-            local = &p;
-            break;
-        }
-    }
+    const PlayerResult* local = FindLocalPlayer(players);
     if (local) {
         return local->name + "\x01" + std::to_string(local->total_time_ms);
     }
@@ -153,13 +147,7 @@ void RunOneTick(const PollContext& ctx, WorkerLoopState& state) {
             }
             state.lapSplits.Resolve(players);
 
-            const PlayerResult* local = nullptr;
-            for (const auto& p : players) {
-                if (p.is_local) {
-                    local = &p;
-                    break;
-                }
-            }
+            const PlayerResult* local = FindLocalPlayer(players);
 
             std::string track = "Unknown Track";
             std::string variation;

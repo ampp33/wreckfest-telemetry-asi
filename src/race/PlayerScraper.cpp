@@ -14,6 +14,15 @@ namespace wreckfest_telemetry {
 
 using namespace offsets;
 
+namespace {
+bool IsPlausibleHeapPtr(std::optional<uint64_t> ptr) {
+    return ptr && *ptr >= MIN_HEAP_PTR && *ptr <= (uint64_t{1} << 47);
+}
+bool IsPlausibleClassRating(std::optional<int32_t> rating) {
+    return rating && *rating >= 50 && *rating <= 600;
+}
+}  // namespace
+
 std::optional<std::vector<uintptr_t>> FastFindSlots(uintptr_t moduleBase) {
     auto managerPtr = ReadU64(moduleBase + CHAIN_STATIC_OFFSET);
     if (!managerPtr || *managerPtr == 0) {
@@ -45,14 +54,14 @@ std::optional<ValidatedSlot> ValidateEntry(uintptr_t addr) {
     if (*bestLap < MIN_LAP_MS || *bestLap > MAX_LAP_MS) return std::nullopt;
     if (*totalTime < MIN_LAP_MS || *totalTime > MAX_TOTAL_MS) return std::nullopt;
     if (*bestLap > *totalTime) return std::nullopt;
-    if (*classRating < 50 || *classRating > 600) return std::nullopt;
+    if (!IsPlausibleClassRating(classRating)) return std::nullopt;
 
     return ValidatedSlot{addr, *totalTime, *bestLap, *classRating};
 }
 
 std::optional<PlayerResult> ReadPlayer(const ValidatedSlot& slot) {
     auto ptrOpt = ReadU64(slot.addr + OFF_PLAYER_PTR);
-    if (!ptrOpt || *ptrOpt < MIN_HEAP_PTR || *ptrOpt > (uint64_t{1} << 47)) {
+    if (!IsPlausibleHeapPtr(ptrOpt)) {
         return std::nullopt;
     }
     uintptr_t ptr = static_cast<uintptr_t>(*ptrOpt);
@@ -155,10 +164,10 @@ std::optional<ValidatedSlot> ValidateSlotRelaxedCore(uintptr_t addr) {
     auto bestLap = ReadI32(addr + OFF_BEST_LAP);
     auto classRating = ReadI32(addr + OFF_CLASS_RATING);
     if (!totalTime || !bestLap || !classRating) return std::nullopt;
-    if (*classRating < 50 || *classRating > 600) return std::nullopt;
+    if (!IsPlausibleClassRating(classRating)) return std::nullopt;
 
     auto ptrOpt = ReadU64(addr + OFF_PLAYER_PTR);
-    if (!ptrOpt || *ptrOpt < MIN_HEAP_PTR || *ptrOpt > (uint64_t{1} << 47)) return std::nullopt;
+    if (!IsPlausibleHeapPtr(ptrOpt)) return std::nullopt;
     auto rawName = ReadCString(static_cast<uintptr_t>(*ptrOpt) + POFF_NAME, 64);
     if (!rawName) return std::nullopt;
     std::string name = StripColorCodes(*rawName);
@@ -223,9 +232,9 @@ int CountStillRacing(uintptr_t slot0) {
         auto st = ReadI32(addr + OFF_STATUS_FLAGS);
         if (!st || (static_cast<uint32_t>(*st) & STATUS_CLASSIFIED_BIT)) continue;
         auto rating = ReadI32(addr + OFF_CLASS_RATING);
-        if (!rating || *rating < 50 || *rating > 600) continue;
+        if (!IsPlausibleClassRating(rating)) continue;
         auto ptrOpt = ReadU64(addr + OFF_PLAYER_PTR);
-        if (!ptrOpt || *ptrOpt < MIN_HEAP_PTR || *ptrOpt > (uint64_t{1} << 47)) continue;
+        if (!IsPlausibleHeapPtr(ptrOpt)) continue;
         auto nameOpt = ReadCString(static_cast<uintptr_t>(*ptrOpt) + POFF_NAME, 64);
         if (nameOpt) {
             std::string name = StripColorCodes(*nameOpt);

@@ -45,14 +45,10 @@ nlohmann::json PlayerToDict(const PlayerResult& p, bool includeLaps) {
 }
 
 nlohmann::json RaceToDict(const RaceResult& race, bool opponentLaps) {
-    const PlayerResult* local = nullptr;
+    const PlayerResult* local = FindLocalPlayer(race.players);
     std::vector<const PlayerResult*> others;
     for (const auto& p : race.players) {
-        if (p.is_local) {
-            local = &p;
-        } else {
-            others.push_back(&p);
-        }
+        if (!p.is_local) others.push_back(&p);
     }
 
     nlohmann::json d = {
@@ -73,13 +69,7 @@ nlohmann::json RaceToDict(const RaceResult& race, bool opponentLaps) {
 }
 
 std::optional<nlohmann::json> BuildApiPayload(const RaceResult& race) {
-    const PlayerResult* local = nullptr;
-    for (const auto& p : race.players) {
-        if (p.is_local) {
-            local = &p;
-            break;
-        }
-    }
+    const PlayerResult* local = FindLocalPlayer(race.players);
     if (!local) return std::nullopt;
 
     nlohmann::json payload = {

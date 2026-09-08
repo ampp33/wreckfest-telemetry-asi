@@ -194,13 +194,7 @@ std::map<int, std::string> ReadCarNames(uintptr_t moduleBase, std::optional<int>
 }
 
 void ResolveCarNames(uintptr_t moduleBase, uintptr_t tableBase, std::vector<PlayerResult>& players) {
-    PlayerResult* localPlayer = nullptr;
-    for (auto& p : players) {
-        if (p.is_local) {
-            localPlayer = &p;
-            break;
-        }
-    }
+    PlayerResult* localPlayer = FindLocalPlayer(players);
 
     if (localPlayer) {
         if (auto resolved = LocalPlayerCarName(moduleBase, tableBase)) {

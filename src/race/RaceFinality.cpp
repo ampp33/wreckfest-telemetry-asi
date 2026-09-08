@@ -29,13 +29,7 @@ bool RaceIsFinal(const std::vector<PlayerResult>& players, int stillRacingCount)
     });
     if (anyStatus) return false;
 
-    const PlayerResult* local = nullptr;
-    for (const auto& p : players) {
-        if (p.is_local) {
-            local = &p;
-            break;
-        }
-    }
+    const PlayerResult* local = FindLocalPlayer(players);
     if (local) {
         return local->finished && local->best_lap_ms >= MIN_LAP_MS && local->best_lap_ms <= MAX_LAP_MS;
     }
