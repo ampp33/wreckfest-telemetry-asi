@@ -1,20 +1,24 @@
 #include "worker/WorkerThread.h"
 
 #include <algorithm>
-#include <cstdio>
+#include <chrono>
 #include <fstream>
-#include <sstream>
-#include <utility>
+#include <map>
+#include <optional>
+#include <string>
+#include <tuple>
 #include <vector>
 
+#include "io/Config.h"
+#include "io/JsonlLog.h"
 #include "io/PluginPaths.h"
-#include "memory/Offsets.h"
+#include "io/Queue.h"
 #include "memory/ProcessMemory.h"
 #include "memory/SehGuard.h"
-#include "memory/SentinelScan.h"
 #include "race/CarNames.h"
 #include "race/LapSplits.h"
 #include "race/PlayerScraper.h"
+#include "race/RaceFinality.h"
 #include "strings/HashRegistry.h"
 #include "strings/TrackDetection.h"
 #include "tuning/SaveFileTuning.h"
@@ -23,158 +27,216 @@ namespace wreckfest_telemetry {
 
 namespace {
 
+constexpr double kFlushBackoffSeconds[] = {60.0, 120.0, 300.0, 900.0};
+constexpr double kPollIntervalSeconds = 0.5;
+
+std::chrono::steady_clock::time_point SecondsFromNow(double seconds) {
+    return std::chrono::steady_clock::now() +
+           std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>(seconds));
+}
+
 void AppendMarker(HMODULE hModule, const std::wstring& line) {
     std::wstring path = PluginFilePath(hModule, L"asi_loaded.txt");
-    if (path.empty()) {
-        return;
-    }
+    if (path.empty()) return;
     std::wofstream out(path.c_str(), std::ios::app);
-    if (!out) {
-        return;
-    }
-    out << line << L"\n";
+    if (out) out << line << L"\n";
 }
 
-void RunPhase1SelfTest(HMODULE hModule) {
-    AppendMarker(hModule, L"phase1: worker thread started");
-
-    auto base = FindModuleBase(L"Wreckfest_x64.exe");
-    AppendMarker(hModule, base ? L"phase1: module base resolved" : L"phase1: module base NOT FOUND");
-
-    auto regions = EnumerateWritableRegions();
-    AppendMarker(hModule, L"phase1: writable regions = " + std::to_wstring(regions.size()));
-
-    auto badRead = ReadI32(0x1);
-    AppendMarker(hModule, badRead.has_value() ? L"phase1: SEH GUARD FAILED (bad read returned a value)"
-                                               : L"phase1: SEH guard caught the bad read (PASS)");
-
-    auto goodRead = ReadI32(reinterpret_cast<uintptr_t>(&hModule));
-    AppendMarker(hModule, goodRead.has_value() ? L"phase1: guarded read of valid memory OK"
-                                                : L"phase1: guarded read of valid memory unexpectedly failed");
-}
-
-std::string FormatLapTimes(const std::vector<int>& laps) {
-    if (laps.empty()) return "-";
-    std::ostringstream oss;
-    for (size_t i = 0; i < laps.size(); ++i) {
-        if (i) oss << ",";
-        oss << laps[i];
-    }
-    return oss.str();
-}
-
-// Dev-only continuous dump for eyeballing scrape_players()-equivalent output
-// against a live race. Written to a file rather than a console -- a
-// Wine-hosted AllocConsole window isn't reliably visible under Proton. Gets
-// replaced by the real poll loop (race-finality detection, logging, POST)
-// in Phase 8+.
-void RunDebugLoop(HMODULE hModule) {
-    std::wstring logPath = PluginFilePath(hModule, L"debug.log");
-
-    auto base = FindModuleBase(L"Wreckfest_x64.exe");
-    if (!base) {
-        AppendMarker(hModule, L"debug: module base not found, skipping debug loop");
-        return;
-    }
-
-    LapSplitTracker lapSplits;
-
-    while (true) {
-        std::ofstream out(logPath.c_str(), std::ios::app);
-
-        auto slots = FastFindSlots(*base);
-        bool usedFallback = false;
-        if (!slots) {
-            auto hits = ClusterSentinelHits(ScanForSentinels(EnumerateWritableRegions()));
-            if (!hits.empty()) {
-                slots = hits;
-                usedFallback = true;
-            }
-        }
-        if (!slots) {
-            if (out) out << "[debug] no slots found (no race in progress?)\n";
-            Sleep(2000);
-            continue;
-        }
-        uintptr_t slot0 = *std::min_element(slots->begin(), slots->end());
-
-        std::vector<std::pair<uintptr_t, PlayerResult>> pairs;
-        for (uintptr_t addr : *slots) {
-            auto validated = ValidateEntry(addr);
-            if (!validated) validated = ValidateAnySlotRelaxed(addr);
-            if (!validated) continue;
-            auto player = ReadPlayer(*validated);
-            if (!player) continue;
-            player->slot_index = static_cast<int>((addr - slot0) / offsets::SLOT_STRIDE);
-            pairs.emplace_back(addr, *player);
-        }
-
-        auto tableBase = GetTableBase(*base);
-        MarkLocalPlayer(base, tableBase, pairs, slot0);
-        int stillRacing = CountStillRacing(slot0);
-
-        std::vector<PlayerResult> players;
-        players.reserve(pairs.size());
-        for (auto& [addr, p] : pairs) players.push_back(p);
-
-        lapSplits.Accumulate(players);
-        if (tableBase) {
-            ResolveCarNames(*base, *tableBase, players);
-        }
-        lapSplits.Resolve(players);
-        auto ranked = RankPlayers(std::move(players));
-        for (size_t i = 0; i < ranked.size(); ++i) {
-            ranked[i].position = static_cast<int>(i) + 1;
-        }
-
-        if (out) {
-            out << "[debug] --- slot dump (" << ranked.size() << " players"
-                << (usedFallback ? ", via sentinel scan" : ", via static chain")
-                << ", still racing=" << stillRacing << ") ---\n";
-        }
-
-        if (tableBase) {
-            auto [track, variation] = DetectTrackAndVariation(*base, *tableBase);
-            auto [lapCount, opponentCount] = ReadRaceSettings(*tableBase);
-            if (out) {
-                out << "[debug] track=" << track << " variation=" << variation
-                    << " laps=" << lapCount << " opponents=" << opponentCount << "\n";
-            }
-        }
-
-        char line[400];
-        for (const auto& player : ranked) {
-            std::snprintf(line, sizeof(line),
-                          "  #%-2d %-18s %-14s %-5s total=%dms best=%dms status=0x%02x "
-                          "laps=%d finishPos=%d splits=%s",
-                          player.position, player.name.c_str(), player.car.c_str(),
-                          player.is_local ? "(you)" : "", player.total_time_ms, player.best_lap_ms,
-                          player.status_flags, player.laps_completed, player.finish_position,
-                          FormatLapTimes(player.lap_times_ms).c_str());
-            if (out) out << line << "\n";
-        }
-
-        for (const auto& player : ranked) {
-            if (!player.is_local || player.car.empty()) continue;
-            auto path = FindCars5Path();
-            if (out) {
-                out << "[debug] cars5.ccrs path: " << (path ? "FOUND" : "NOT FOUND") << "\n";
-            }
-            auto tuning = ReadTuningFromSave(player.car);
-            if (out) {
-                out << "[debug] save-file tuning for \"" << player.car << "\": ";
-                if (tuning.empty()) {
-                    out << "(none)";
-                } else {
-                    for (auto& [label, idx] : tuning) out << label << "=" << idx << " ";
-                }
-                out << "\n";
-            }
+// Local player's (name, total_time_ms) if identified, else the whole
+// field's -- scoped to the local player alone whenever possible so a
+// straggler elsewhere in the field can't hold this "unstable" forever
+// (see RaceFinality.h and main()'s poll loop in the Python source).
+std::string ComputeFingerprint(const std::vector<PlayerResult>& players) {
+    const PlayerResult* local = nullptr;
+    for (const auto& p : players) {
+        if (p.is_local) {
+            local = &p;
             break;
         }
+    }
+    if (local) {
+        return local->name + "\x01" + std::to_string(local->total_time_ms);
+    }
+    std::string s;
+    for (const auto& p : players) {
+        s += p.name + "\x01" + std::to_string(p.total_time_ms) + "\x02";
+    }
+    return s;
+}
 
-        out.close();
-        Sleep(2000);
+struct WorkerLoopState {
+    std::optional<std::vector<uintptr_t>> cachedAddrs;
+    bool scanNeeded = true;
+    std::optional<std::string> lastFingerprintSeen;
+    std::optional<std::string> lastLoggedFingerprint;
+    bool firstPoll = true;
+    // Once a name is established as local for this session, a race later
+    // resolving a DIFFERENT name as local is still logged to file for
+    // review, but the API post is skipped -- guards against CLIENT
+    // occasionally mislabeling a real other racer as local.
+    std::optional<std::string> confirmedLocalName;
+    LapSplitTracker lapSplits;
+    int flushBackoffIdx = 0;
+    std::chrono::steady_clock::time_point nextFlushAt;
+    int queuePending = 0;
+};
+
+void EmitRace(const RaceResult& race, const std::wstring& logPath, const ApiConfig& apiConfig,
+              const std::wstring& queuePath, const std::wstring& deadPath, bool allowApi) {
+    AppendRaceLog(race, logPath, false);
+    if (!allowApi || !ApiConfigComplete(apiConfig)) return;
+    auto payload = BuildApiPayload(race);
+    if (!payload) return;
+    PostOrQueue(apiConfig, *payload, queuePath, deadPath);
+}
+
+struct PollContext {
+    uintptr_t base;
+    std::wstring logPath;
+    std::wstring queuePath;
+    std::wstring deadPath;
+    ApiConfig apiConfig;
+};
+
+// One full poll tick. Wrapped in SehGuarded by the caller as a coarse,
+// second line of defense beyond the fine-grained per-read guards already
+// inside ScrapePlayers/ResolveCarNames/etc. -- an unanticipated bad pointer
+// chain anywhere in here must degrade to "skip this tick", never take the
+// game down with it.
+void RunOneTick(const PollContext& ctx, WorkerLoopState& state) {
+    int stillRacing = 0;
+    auto tableBase = GetTableBase(ctx.base);
+
+    ScrapeResult scrape = state.scanNeeded
+                              ? ScrapePlayers(ctx.base, tableBase, std::nullopt, state.lapSplits, stillRacing)
+                              : ScrapePlayers(ctx.base, tableBase, state.cachedAddrs, state.lapSplits, stillRacing);
+    state.scanNeeded = false;
+    state.cachedAddrs = scrape.usedAddrs;
+    if (!state.cachedAddrs) state.scanNeeded = true;
+
+    auto& players = scrape.players;
+    if (!players.empty()) {
+        std::string fingerprint = ComputeFingerprint(players);
+        bool isStable = state.lastFingerprintSeen && *state.lastFingerprintSeen == fingerprint;
+        bool raceFinal = RaceIsFinal(players, stillRacing);
+
+        // A race already finished when the plugin attached is adopted as
+        // already-logged rather than emitted -- it has no lap splits
+        // (never watched from the start), so emitting it would be a
+        // strictly worse duplicate of whatever's already in the log from
+        // a prior session.
+        if (state.firstPoll && raceFinal) {
+            state.lastLoggedFingerprint = fingerprint;
+        }
+        state.firstPoll = false;
+
+        if (raceFinal && isStable && (!state.lastLoggedFingerprint || *state.lastLoggedFingerprint != fingerprint)) {
+            if (tableBase) {
+                ResolveCarNames(ctx.base, *tableBase, players);
+            }
+            state.lapSplits.Resolve(players);
+
+            const PlayerResult* local = nullptr;
+            for (const auto& p : players) {
+                if (p.is_local) {
+                    local = &p;
+                    break;
+                }
+            }
+
+            std::string track = "Unknown Track";
+            std::string variation;
+            int lapCount = 0;
+            int opponentCount = 0;
+            if (tableBase) {
+                std::tie(track, variation) = DetectTrackAndVariation(ctx.base, *tableBase);
+                std::tie(lapCount, opponentCount) = ReadRaceSettings(*tableBase);
+            }
+
+            // Live Tune-screen widget reads (Phase 7) aren't ported yet --
+            // save-file tuning alone can lag a just-changed setting until
+            // the Tune screen is backed out of, a known, accepted gap
+            // until that phase lands.
+            std::map<std::string, int> tuning;
+            if (local && !local->car.empty()) {
+                tuning = ReadTuningFromSave(local->car);
+            }
+
+            RaceResult race;
+            race.lap_count = lapCount;
+            race.opponent_count = opponentCount;
+            race.track = track;
+            race.variation = variation;
+            race.timestamp = NowTimestamp();
+            race.tuning = tuning;
+            race.players = players;
+
+            bool identityTrusted = true;
+            if (local) {
+                if (!state.confirmedLocalName) {
+                    state.confirmedLocalName = local->name;
+                } else if (*state.confirmedLocalName != local->name) {
+                    identityTrusted = false;
+                }
+            }
+
+            EmitRace(race, ctx.logPath, ctx.apiConfig, ctx.queuePath, ctx.deadPath, identityTrusted);
+            if (ApiConfigComplete(ctx.apiConfig)) {
+                state.queuePending = static_cast<int>(ReadQueue(ctx.queuePath).size());
+                state.flushBackoffIdx = 0;
+                state.nextFlushAt = SecondsFromNow(kFlushBackoffSeconds[0]);
+            }
+            state.lastLoggedFingerprint = fingerprint;
+        }
+        state.lastFingerprintSeen = fingerprint;
+    } else {
+        state.lastFingerprintSeen.reset();
+        state.lastLoggedFingerprint.reset();
+    }
+
+    if (state.queuePending && std::chrono::steady_clock::now() >= state.nextFlushAt) {
+        auto flushed = FlushQueue(ctx.apiConfig, ctx.queuePath, ctx.deadPath);
+        state.queuePending = flushed.remaining;
+        state.flushBackoffIdx = flushed.sent > 0
+                                     ? 0
+                                     : std::min(state.flushBackoffIdx + 1,
+                                                static_cast<int>(std::size(kFlushBackoffSeconds)) - 1);
+        state.nextFlushAt = SecondsFromNow(kFlushBackoffSeconds[state.flushBackoffIdx]);
+    }
+}
+
+void RunPollLoop(HMODULE hModule) {
+    auto base = FindModuleBase(L"Wreckfest_x64.exe");
+    AppendMarker(hModule, base ? L"worker thread started, module base resolved"
+                               : L"worker thread started, module base NOT FOUND -- exiting");
+    if (!base) return;
+
+    PollContext ctx;
+    ctx.base = *base;
+    ctx.logPath = PluginFilePath(hModule, L"race_log.jsonl");
+    ctx.queuePath = PluginFilePath(hModule, L"pending_races.jsonl");
+    ctx.deadPath = PluginFilePath(hModule, L"failed_races.jsonl");
+    ctx.apiConfig = LoadConfig(PluginFilePath(hModule, L"config.json"));
+
+    WorkerLoopState state;
+    // Drain any backlog left over from an offline session before doing
+    // anything else -- the common case is "was offline last session,
+    // online now".
+    if (ApiConfigComplete(ctx.apiConfig) && !ReadQueue(ctx.queuePath).empty()) {
+        state.queuePending = FlushQueue(ctx.apiConfig, ctx.queuePath, ctx.deadPath).remaining;
+    }
+    state.nextFlushAt = SecondsFromNow(kFlushBackoffSeconds[0]);
+
+    while (true) {
+        // Coarse safety net: an unanticipated bad pointer chain anywhere
+        // in RunOneTick degrades to "skip this tick" rather than crashing
+        // Wreckfest. The fine-grained per-read guards inside ScrapePlayers
+        // etc. are the primary defense; this is the backstop.
+        SehGuarded([&] {
+            RunOneTick(ctx, state);
+            return 0;
+        });
+        Sleep(static_cast<DWORD>(kPollIntervalSeconds * 1000));
     }
 }
 
@@ -182,11 +244,8 @@ void RunDebugLoop(HMODULE hModule) {
 
 DWORD WINAPI WorkerThreadMain(LPVOID param) {
     HMODULE hModule = static_cast<HMODULE>(param);
-
     InstallSehGuard();
-    RunPhase1SelfTest(hModule);
-    RunDebugLoop(hModule);
-
+    RunPollLoop(hModule);
     return 0;
 }
 

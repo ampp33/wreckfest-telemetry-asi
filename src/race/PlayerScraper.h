@@ -5,6 +5,7 @@
 #include <utility>
 #include <vector>
 
+#include "race/LapSplits.h"
 #include "race/PlayerResult.h"
 
 namespace wreckfest_telemetry {
@@ -67,5 +68,25 @@ void MarkLocalPlayer(std::optional<uintptr_t> moduleBase, std::optional<uintptr_
 // (OFF_FINISH_POSITION) when every player has a distinct, non-zero value;
 // falls back to (dnf, -laps_completed, total_time_ms) otherwise.
 std::vector<PlayerResult> RankPlayers(std::vector<PlayerResult> players);
+
+struct ScrapeResult {
+    std::vector<PlayerResult> players;  // empty if nothing validated this tick
+    // The slot addresses to reuse as `cachedAddrs` next call. nullopt means
+    // "start over" -- either nothing was found at all, or this was a FRESH
+    // discovery (no cachedAddrs passed in) that validated zero players, so
+    // the addresses aren't trusted enough to cache yet. An already-cached
+    // set of addresses is always kept even on a zero-player tick (mid-race
+    // idle/menu is normal; the array itself is a fixed per-race allocation
+    // that stays valid for the process's lifetime).
+    std::optional<std::vector<uintptr_t>> usedAddrs;
+};
+
+// The full per-poll pipeline: slot discovery (cached addresses, or the
+// static chain, or the sentinel-scan fallback), per-slot validation/read,
+// local-player marking, still-racing count (written to `outStillRacing`),
+// lap-split accumulation, and ranking.
+ScrapeResult ScrapePlayers(uintptr_t moduleBase, std::optional<uintptr_t> tableBase,
+                           std::optional<std::vector<uintptr_t>> cachedAddrs, LapSplitTracker& lapSplits,
+                           int& outStillRacing);
 
 }  // namespace wreckfest_telemetry

@@ -7,6 +7,7 @@
 #include <tuple>
 
 #include "memory/ProcessMemory.h"
+#include "memory/SentinelScan.h"
 #include "strings/HashRegistry.h"
 
 namespace wreckfest_telemetry {
@@ -314,6 +315,64 @@ std::vector<PlayerResult> RankPlayers(std::vector<PlayerResult> players) {
         });
     }
     return players;
+}
+
+ScrapeResult ScrapePlayers(uintptr_t moduleBase, std::optional<uintptr_t> tableBase,
+                           std::optional<std::vector<uintptr_t>> cachedAddrs, LapSplitTracker& lapSplits,
+                           int& outStillRacing) {
+    ScrapeResult result;
+    bool usingCache = cachedAddrs.has_value();
+    std::vector<uintptr_t> addrs;
+
+    if (usingCache) {
+        addrs = *cachedAddrs;
+    } else {
+        auto slots = FastFindSlots(moduleBase);
+        if (!slots) {
+            auto hits = ClusterSentinelHits(ScanForSentinels(EnumerateWritableRegions()));
+            if (hits.empty()) {
+                outStillRacing = 0;
+                return result;
+            }
+            slots = std::move(hits);
+        }
+        addrs = *slots;
+    }
+
+    uintptr_t slot0 = *std::min_element(addrs.begin(), addrs.end());
+    std::vector<std::pair<uintptr_t, PlayerResult>> pairs;
+    std::set<std::string> seenNames;
+    for (uintptr_t addr : addrs) {
+        auto validated = ValidateEntry(addr);
+        if (!validated) validated = ValidateAnySlotRelaxed(addr);
+        if (!validated) continue;
+        auto player = ReadPlayer(*validated);
+        if (!player || seenNames.count(player->name)) continue;
+        seenNames.insert(player->name);
+        player->slot_index = static_cast<int>((addr - slot0) / SLOT_STRIDE);
+        pairs.emplace_back(addr, *player);
+    }
+
+    MarkLocalPlayer(moduleBase, tableBase, pairs, slot0);
+    outStillRacing = CountStillRacing(slot0);
+
+    std::vector<PlayerResult> players;
+    players.reserve(pairs.size());
+    for (auto& [addr, p] : pairs) players.push_back(p);
+    lapSplits.Accumulate(players);
+
+    if (pairs.empty()) {
+        if (usingCache) {
+            result.usedAddrs = std::move(addrs);
+        }
+        return result;
+    }
+
+    result.usedAddrs = std::move(addrs);
+    auto ranked = RankPlayers(std::move(players));
+    for (size_t i = 0; i < ranked.size(); ++i) ranked[i].position = static_cast<int>(i) + 1;
+    result.players = std::move(ranked);
+    return result;
 }
 
 }  // namespace wreckfest_telemetry
