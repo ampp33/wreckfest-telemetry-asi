@@ -63,4 +63,9 @@ void MarkLocalPlayer(std::optional<uintptr_t> moduleBase, std::optional<uintptr_
                       std::vector<std::pair<uintptr_t, PlayerResult>>& pairs,
                       std::optional<uintptr_t> slot0);
 
+// Sorts into finishing order, preferring the engine's own position byte
+// (OFF_FINISH_POSITION) when every player has a distinct, non-zero value;
+// falls back to (dnf, -laps_completed, total_time_ms) otherwise.
+std::vector<PlayerResult> RankPlayers(std::vector<PlayerResult> players);
+
 }  // namespace wreckfest_telemetry

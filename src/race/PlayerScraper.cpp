@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <set>
+#include <tuple>
 
 #include "memory/ProcessMemory.h"
 #include "strings/HashRegistry.h"
@@ -291,6 +293,27 @@ void MarkLocalPlayer(std::optional<uintptr_t> moduleBase, std::optional<uintptr_
         localPlayer = &minIt->second;
     }
     localPlayer->is_local = true;
+}
+
+std::vector<PlayerResult> RankPlayers(std::vector<PlayerResult> players) {
+    std::vector<int> positions;
+    positions.reserve(players.size());
+    for (const auto& p : players) positions.push_back(p.finish_position);
+    bool allPositive = std::all_of(positions.begin(), positions.end(), [](int v) { return v > 0; });
+    std::set<int> uniquePositions(positions.begin(), positions.end());
+    bool usable = allPositive && uniquePositions.size() == positions.size();
+
+    if (usable) {
+        std::sort(players.begin(), players.end(), [](const PlayerResult& a, const PlayerResult& b) {
+            return a.finish_position < b.finish_position;
+        });
+    } else {
+        std::sort(players.begin(), players.end(), [](const PlayerResult& a, const PlayerResult& b) {
+            return std::make_tuple(a.dnf(), -a.laps_completed, a.total_time_ms) <
+                   std::make_tuple(b.dnf(), -b.laps_completed, b.total_time_ms);
+        });
+    }
+    return players;
 }
 
 }  // namespace wreckfest_telemetry
