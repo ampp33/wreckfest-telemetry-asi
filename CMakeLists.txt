@@ -23,6 +23,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
         src/io/PluginPaths.cpp
         src/memory/SehGuard.cpp
         src/memory/ProcessMemory.cpp
+        src/memory/SentinelScan.cpp
+        src/race/PlayerScraper.cpp
     )
 
     target_include_directories(wreckfest_telemetry PRIVATE
