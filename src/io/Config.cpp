@@ -22,6 +22,7 @@ ApiConfig LoadConfig(const std::wstring& path) {
     config.api_key = j.value("api_key", "");
     config.supabase_url = j.value("supabase_url", "");
     config.supabase_anon_key = j.value("supabase_anon_key", "");
+    config.debug_console = j.value("debug_console", false);
     return config;
 }
 

@@ -9,6 +9,7 @@
 #include <tuple>
 #include <vector>
 
+#include "debug/DebugConsole.h"
 #include "io/Config.h"
 #include "io/JsonlLog.h"
 #include "io/PluginPaths.h"
@@ -28,6 +29,12 @@ namespace wreckfest_telemetry {
 namespace {
 
 constexpr double kFlushBackoffSeconds[] = {60.0, 120.0, 300.0, 900.0};
+
+// Widens an ASCII literal for DebugLog -- not for arbitrary UTF-8 content
+// (player/track names), just our own fixed debug strings.
+std::wstring WidenAscii(const std::string& s) {
+    return std::wstring(s.begin(), s.end());
+}
 constexpr double kPollIntervalSeconds = 0.5;
 
 std::chrono::steady_clock::time_point SecondsFromNow(double seconds) {
@@ -83,10 +90,20 @@ struct WorkerLoopState {
 
 void EmitRace(const RaceResult& race, const std::wstring& logPath, const ApiConfig& apiConfig,
               const std::wstring& queuePath, const std::wstring& deadPath, bool allowApi) {
-    AppendRaceLog(race, logPath, false);
-    if (!allowApi || !ApiConfigComplete(apiConfig)) return;
+    bool logged = AppendRaceLog(race, logPath, false);
+    DebugLog((L"race logged: " + WidenAscii(race.track) + L" (" +
+              WidenAscii(logged ? "ok" : "FAILED TO WRITE LOG FILE") + L")")
+                 .c_str());
+    if (!allowApi) {
+        DebugLog(L"API post skipped: local player identity unconfirmed this race");
+        return;
+    }
+    if (!ApiConfigComplete(apiConfig)) return;
     auto payload = BuildApiPayload(race);
-    if (!payload) return;
+    if (!payload) {
+        DebugLog(L"API post skipped: no local player identified");
+        return;
+    }
     PostOrQueue(apiConfig, *payload, queuePath, deadPath);
 }
 
@@ -217,6 +234,10 @@ void RunPollLoop(HMODULE hModule) {
     ctx.queuePath = PluginFilePath(hModule, L"pending_races.jsonl");
     ctx.deadPath = PluginFilePath(hModule, L"failed_races.jsonl");
     ctx.apiConfig = LoadConfig(PluginFilePath(hModule, L"config.json"));
+    if (ctx.apiConfig.debug_console) {
+        EnableDebugConsole();
+        DebugLog(L"wreckfest-telemetry-asi debug console enabled");
+    }
 
     WorkerLoopState state;
     // Drain any backlog left over from an offline session before doing
