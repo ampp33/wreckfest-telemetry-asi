@@ -25,6 +25,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
         src/memory/ProcessMemory.cpp
         src/memory/SentinelScan.cpp
         src/race/PlayerScraper.cpp
+        src/strings/HashRegistry.cpp
+        src/strings/TrackDetection.cpp
     )
 
     target_include_directories(wreckfest_telemetry PRIVATE

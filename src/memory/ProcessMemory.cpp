@@ -49,7 +49,15 @@ std::optional<std::string> ReadCString(uintptr_t addr, size_t maxLen) {
         }
         return s;
     });
-    return raw;
+    if (!raw) {
+        return std::nullopt;
+    }
+    size_t start = raw->find_first_not_of(" \t\r\n");
+    if (start == std::string::npos) {
+        return std::string();
+    }
+    size_t end = raw->find_last_not_of(" \t\r\n");
+    return raw->substr(start, end - start + 1);
 }
 
 }  // namespace wreckfest_telemetry
