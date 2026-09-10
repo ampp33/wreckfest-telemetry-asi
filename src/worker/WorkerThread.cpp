@@ -31,6 +31,13 @@ namespace {
 constexpr double kFlushBackoffSeconds[] = {60.0, 120.0, 300.0, 900.0};
 constexpr double kPollIntervalSeconds = 0.5;
 
+// Remote source for {supabase_url, supabase_anon_key} -- see Config.h.
+// wfracelog.com is GitHub Pages, which enforces HTTPS (a plain http://
+// request 301s here) -- go straight to https:// rather than relying on
+// WinHTTP's redirect-following. FetchRemoteApiDefaults() degrades to an
+// empty result (API posting disabled for the run) if it can't be reached.
+const wchar_t kRemoteConfigUrl[] = L"https://wfracelog.com/plugin/config.default.json";
+
 // Widens an ASCII literal for DebugLog -- not for arbitrary UTF-8 content
 // (player/track names), just our own fixed debug strings.
 std::wstring WidenAscii(const std::string& s) {
@@ -221,10 +228,16 @@ void RunPollLoop(HMODULE hModule) {
     ctx.logPath = PluginFilePath(hModule, L"race_log.jsonl");
     ctx.queuePath = PluginFilePath(hModule, L"pending_races.jsonl");
     ctx.deadPath = PluginFilePath(hModule, L"failed_races.jsonl");
-    ctx.apiConfig = LoadConfig(PluginFilePath(hModule, L"config.json"));
-    if (ctx.apiConfig.debug_console) {
-        EnableDebugConsole();
-        DebugLog(L"wreckfest-telemetry-asi debug console enabled");
+    // TODO: no flag currently wired up to EnableDebugConsole() -- a new way
+    // to opt into it is coming; DebugLog() calls below stay as no-ops until
+    // then (see DebugConsole.cpp: it's silent unless the console was
+    // enabled).
+    ctx.apiConfig.api_key = LoadApiKey(PluginFilePath(hModule, L"api-key.txt"));
+    RemoteApiDefaults remote = FetchRemoteApiDefaults(kRemoteConfigUrl);
+    ctx.apiConfig.supabase_url = remote.supabase_url;
+    ctx.apiConfig.supabase_anon_key = remote.supabase_anon_key;
+    if (!ApiConfigComplete(ctx.apiConfig)) {
+        DebugLog(L"API posting disabled this run: api-key.txt and/or remote config (wfracelog.com) unavailable");
     }
 
     WorkerLoopState state;

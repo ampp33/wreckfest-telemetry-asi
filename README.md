@@ -6,16 +6,24 @@ It reads full race results, car/track/tuning data, and lap splits directly from 
 
 ## Installation
 
-1. Download **Ultimate ASI Loader** [version.dll](https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases/download/x64-latest/version-x64.zip). 
-1. Drop it into your Wreckfest install root directory (next to
-   `Wreckfest_x64.exe`).
-1. Create a `scripts` folder in the same directory and put `wreckfest_telemetry.asi` there.
-1. Rename `config.json.example` to `config.json`, put it next to the `.asi`.
-1. Go to the [Wreckfest Race Log API Keys](https://wfracelog.com/#/settings/api-keys) page and generate an API key.
-1. Put the API key you generated into your `config.json` file
+1. Download the latest release zip from the
+   [Releases](https://github.com/ampp33/wreckfest-telemetry-asi/releases) page. It already bundles
+   **Ultimate ASI Loader**'s `version.dll` and a `scripts/` folder containing
+   `wreckfest_telemetry.asi` and `api-key.txt`.
+1. Extract it into your Wreckfest install root directory (next to `Wreckfest_x64.exe`), so
+   `version.dll` and `scripts/` land there.
+1. Go to the [Wreckfest Race Log API Keys](https://wfracelog.com/#/settings/api-keys) page and
+   generate an API key.
+1. Open `scripts/api-key.txt` and replace the placeholder text with the API key you generated
+   (one line, nothing else).
 1. **Steam Play (Proton) only**: add `WINEDLLOVERRIDES="version=n,b" %command%` to Wreckfest's
    launch options, so Wine loads the real proxy DLL instead of its own built-in stub. Not needed on
    native Windows.
+
+Supabase connection details (where results get posted) are fetched automatically from
+[wfracelog.com](https://wfracelog.com/) at startup -- there's nothing to configure for that. If the
+site can't be reached, API posting is silently disabled for that run; races still get logged to
+`race_log.jsonl` either way.
 
 **Verifing it's working**: Complete a race in Wreckfest, the race log entry should appear at the top of the table in the [races](https://wfracelog.com/#/races) page.
 
@@ -53,5 +61,5 @@ cmake --build build
 
 ### Appendix
 
-`race_log.jsonl`, `config.json`, and the offline retry queue (`pending_races.jsonl`,
+`race_log.jsonl`, `api-key.txt`, and the offline retry queue (`pending_races.jsonl`,
 `failed_races.jsonl`) all live next to the `.asi`, i.e. in `<Wreckfest install>/scripts/`.

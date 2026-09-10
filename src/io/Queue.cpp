@@ -6,7 +6,7 @@
 #include <fstream>
 #include <sstream>
 
-#include "net/HttpClient.h"
+#include "net/SupabaseClient.h"
 
 namespace wreckfest_telemetry {
 

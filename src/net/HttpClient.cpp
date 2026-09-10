@@ -3,6 +3,7 @@
 #include <windows.h>
 #include <winhttp.h>
 
+#include <utility>
 #include <vector>
 
 namespace wreckfest_telemetry {
@@ -23,43 +24,13 @@ struct HInternetHandle {
     explicit operator bool() const { return h != nullptr; }
 };
 
-std::string SafeStringField(const nlohmann::json& data, const std::string& key, const std::string& fallback) {
-    if (!data.contains(key)) return fallback;
-    const auto& v = data[key];
-    return v.is_string() ? v.get<std::string>() : v.dump();
-}
+HttpResult Failed() { return {false, 0, ""}; }
 
-PostResult ParseResponse(int status, const std::string& raw) {
-    nlohmann::json data;
-    try {
-        data = nlohmann::json::parse(raw);
-    } catch (const nlohmann::json::exception&) {
-        return {false, true, "HTTP " + std::to_string(status) + ", non-JSON response"};
-    }
-    if (!data.is_object()) {
-        return {false, true, "HTTP " + std::to_string(status) + ", unexpected response"};
-    }
-    if (!(status >= 200 && status < 300)) {
-        bool retryable = status >= 500 || status == 408 || status == 429;
-        return {false, retryable, "HTTP " + std::to_string(status) + ": " + SafeStringField(data, "error", raw)};
-    }
-    if (!data.value("success", false)) {
-        return {false, false, "rejected: " + SafeStringField(data, "error", "unknown error")};
-    }
-    return {true, false, "ok"};
-}
-
-std::wstring Widen(const std::string& s) {
-    return std::wstring(s.begin(), s.end());  // ASCII in practice (Supabase URLs/keys)
-}
-
-}  // namespace
-
-PostResult PostPayload(const ApiConfig& config, nlohmann::json payload, double timeoutSeconds) try {
-    payload["api_key"] = config.api_key;
-    std::string body = payload.dump();
-
-    std::wstring wUrl = Widen(config.supabase_url);
+// Shared WinHTTP round trip: crack `url`, open a session/connection/
+// request, send it (optional headers/body), and read back the status code
+// + full body. Both HttpGet and HttpPost are thin wrappers around this.
+HttpResult SendRequest(const std::wstring& url, const wchar_t* method, const std::wstring& headers,
+                       const std::string& body, double timeoutSeconds) {
     wchar_t hostBuf[256]{};
     wchar_t pathBuf[2048]{};
     URL_COMPONENTS uc{};
@@ -69,55 +40,65 @@ PostResult PostPayload(const ApiConfig& config, nlohmann::json payload, double t
     uc.lpszUrlPath = pathBuf;
     uc.dwUrlPathLength = 2048;
     uc.dwSchemeLength = static_cast<DWORD>(-1);
-    if (!WinHttpCrackUrl(wUrl.c_str(), 0, 0, &uc)) {
-        return {false, false, "malformed supabase_url"};
+    if (!WinHttpCrackUrl(url.c_str(), 0, 0, &uc)) {
+        return Failed();
     }
     bool secure = uc.nScheme == INTERNET_SCHEME_HTTPS;
 
     HInternetHandle hSession(WinHttpOpen(L"wreckfest-telemetry-asi/1.0", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
                                           WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0));
-    if (!hSession) return {false, true, "network error: WinHttpOpen failed"};
+    if (!hSession) return Failed();
 
     DWORD ms = static_cast<DWORD>(timeoutSeconds * 1000.0);
     WinHttpSetTimeouts(hSession, static_cast<int>(ms), static_cast<int>(ms), static_cast<int>(ms),
                         static_cast<int>(ms));
 
     HInternetHandle hConnect(WinHttpConnect(hSession, uc.lpszHostName, uc.nPort, 0));
-    if (!hConnect) return {false, true, "network error: WinHttpConnect failed"};
+    if (!hConnect) return Failed();
 
-    HInternetHandle hRequest(WinHttpOpenRequest(hConnect, L"POST", uc.lpszUrlPath, nullptr, WINHTTP_NO_REFERER,
+    HInternetHandle hRequest(WinHttpOpenRequest(hConnect, method, uc.lpszUrlPath, nullptr, WINHTTP_NO_REFERER,
                                                  WINHTTP_DEFAULT_ACCEPT_TYPES, secure ? WINHTTP_FLAG_SECURE : 0));
-    if (!hRequest) return {false, true, "network error: WinHttpOpenRequest failed"};
+    if (!hRequest) return Failed();
 
-    std::wstring headers = L"Content-Type: application/json\r\napikey: " + Widen(config.supabase_anon_key) + L"\r\n";
+    LPCWSTR headersPtr = headers.empty() ? WINHTTP_NO_ADDITIONAL_HEADERS : headers.c_str();
+    DWORD headersLen = headers.empty() ? 0 : static_cast<DWORD>(-1);
+    LPVOID bodyPtr = body.empty() ? WINHTTP_NO_REQUEST_DATA : const_cast<char*>(body.data());
+    DWORD bodyLen = static_cast<DWORD>(body.size());
 
-    PostResult result;
-    BOOL sent = WinHttpSendRequest(hRequest, headers.c_str(), static_cast<DWORD>(-1),
-                                    const_cast<char*>(body.data()), static_cast<DWORD>(body.size()),
-                                    static_cast<DWORD>(body.size()), 0);
-    if (!sent) {
-        result = {false, true, "network error: send failed"};
-    } else if (!WinHttpReceiveResponse(hRequest, nullptr)) {
-        result = {false, true, "network error: no response"};
-    } else {
-        DWORD statusCode = 0;
-        DWORD size = sizeof(statusCode);
-        WinHttpQueryHeaders(hRequest, WINHTTP_QUERY_FLAG_NUMBER | WINHTTP_QUERY_STATUS_CODE,
-                             WINHTTP_HEADER_NAME_BY_INDEX, &statusCode, &size, WINHTTP_NO_HEADER_INDEX);
-
-        std::string raw;
-        DWORD avail = 0;
-        while (WinHttpQueryDataAvailable(hRequest, &avail) && avail > 0) {
-            std::vector<char> buf(avail);
-            DWORD read = 0;
-            if (!WinHttpReadData(hRequest, buf.data(), avail, &read)) break;
-            raw.append(buf.data(), read);
-        }
-        result = ParseResponse(static_cast<int>(statusCode), raw);
+    BOOL sent = WinHttpSendRequest(hRequest, headersPtr, headersLen, bodyPtr, bodyLen, bodyLen, 0);
+    if (!sent || !WinHttpReceiveResponse(hRequest, nullptr)) {
+        return Failed();
     }
-    return result;
+
+    DWORD statusCode = 0;
+    DWORD size = sizeof(statusCode);
+    WinHttpQueryHeaders(hRequest, WINHTTP_QUERY_FLAG_NUMBER | WINHTTP_QUERY_STATUS_CODE,
+                         WINHTTP_HEADER_NAME_BY_INDEX, &statusCode, &size, WINHTTP_NO_HEADER_INDEX);
+
+    std::string raw;
+    DWORD avail = 0;
+    while (WinHttpQueryDataAvailable(hRequest, &avail) && avail > 0) {
+        std::vector<char> buf(avail);
+        DWORD read = 0;
+        if (!WinHttpReadData(hRequest, buf.data(), avail, &read)) break;
+        raw.append(buf.data(), read);
+    }
+    return {true, static_cast<int>(statusCode), std::move(raw)};
+}
+
+}  // namespace
+
+HttpResult HttpGet(const std::wstring& url, double timeoutSeconds) try {
+    return SendRequest(url, L"GET", L"", "", timeoutSeconds);
 } catch (...) {
-    return {false, true, "network error: unexpected exception"};
+    return Failed();
+}
+
+HttpResult HttpPost(const std::wstring& url, const std::wstring& headers, const std::string& body,
+                     double timeoutSeconds) try {
+    return SendRequest(url, L"POST", headers, body, timeoutSeconds);
+} catch (...) {
+    return Failed();
 }
 
 }  // namespace wreckfest_telemetry

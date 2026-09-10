@@ -39,6 +39,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
         src/io/Config.cpp
         src/io/Queue.cpp
         src/net/HttpClient.cpp
+        src/net/SupabaseClient.cpp
         ${DEPS_DIR}/lz4.c
     )
 

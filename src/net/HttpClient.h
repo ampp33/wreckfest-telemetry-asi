@@ -2,26 +2,25 @@
 
 #include <string>
 
-#include "io/Config.h"
-#include "json.hpp"
-
 namespace wreckfest_telemetry {
 
-struct PostResult {
+// Outcome of a single HTTP(S) round trip. `ok` covers only the transport
+// layer (URL parsing, connect, send, receive) -- a well-formed HTTP error
+// response (4xx/5xx) still comes back ok == true with that status code;
+// callers interpret status/body for themselves. Never throws.
+struct HttpResult {
     bool ok;
-    bool retryable;  // meaningful only when ok == false
-    std::string message;
+    int status = 0;    // meaningful only when ok
+    std::string body;  // meaningful only when ok
 };
 
-// POSTs one payload. api_key is injected here, at send time -- callers must
-// never persist a payload that already has it baked in (the queue file
-// gets the payload before this call, not after).
-//
-// Response handling: the backend answers HTTP 200 even for validation
-// failures -- the real success signal is the in-body JSON "success" field.
-// A non-2xx status is retryable only if >=500 or in {408, 429}; a
-// non-JSON/non-object body is treated as retryable (proxy/captive-portal
-// misbehavior, not a real rejection). Never throws.
-PostResult PostPayload(const ApiConfig& config, nlohmann::json payload, double timeoutSeconds = 10.0);
+// Plain HTTP(S) GET.
+HttpResult HttpGet(const std::wstring& url, double timeoutSeconds = 10.0);
+
+// Plain HTTP(S) POST. `headers` is a raw CRLF-terminated header block (or
+// empty for none), e.g. L"Content-Type: application/json\r\n"; `body` is
+// sent as-is with no assumptions about its content type or shape.
+HttpResult HttpPost(const std::wstring& url, const std::wstring& headers, const std::string& body,
+                     double timeoutSeconds = 10.0);
 
 }  // namespace wreckfest_telemetry

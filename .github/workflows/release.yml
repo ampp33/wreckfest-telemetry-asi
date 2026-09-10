@@ -49,9 +49,17 @@ jobs:
 
       - name: Package
         run: |
-          mkdir -p dist
-          cp build/wreckfest_telemetry.asi dist/
-          cp config.json.example dist/
+          mkdir -p dist/scripts
+
+          # Ultimate ASI Loader -- ships as version.dll at the Wreckfest
+          # install root; renamed by convention so the game loads it in
+          # place of the real system DLL, which it then proxies through.
+          curl -sL -o ual.zip https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases/download/x64-latest/version-x64.zip
+          unzip -p ual.zip version.dll > dist/version.dll
+
+          cp build/wreckfest_telemetry.asi dist/scripts/
+          echo "your-per-user-api-key-from-settings-page" > dist/scripts/api-key.txt
+
           cd dist && zip -r "../wreckfest-telemetry-asi-${GITHUB_REF_NAME}.zip" .
 
       - name: Create release
@@ -62,10 +70,11 @@ jobs:
           generate_release_notes: true
           body: |
             See the [README](https://github.com/${{ github.repository }}#installing) for install
-            steps: drop `wreckfest_telemetry.asi` into your Wreckfest install's `scripts/` folder
-            alongside [Ultimate ASI Loader](https://github.com/ThirteenAG/Ultimate-ASI-Loader)
-            (renamed `version.dll`), copy `config.json.example` to `config.json` if you want races
-            posted automatically, and add the `WINEDLLOVERRIDES` launch option if you're on Steam
+            steps: extract this zip into your Wreckfest install root -- it bundles
+            [Ultimate ASI Loader](https://github.com/ThirteenAG/Ultimate-ASI-Loader) (`version.dll`)
+            and a `scripts/` folder with `wreckfest_telemetry.asi` and `api-key.txt` -- then put
+            your API key from the [settings page](https://wfracelog.com/#/settings/api-keys) into
+            `scripts/api-key.txt`, and add the `WINEDLLOVERRIDES` launch option if you're on Steam
             Play (Proton).
 
       - name: Upload workflow artifact

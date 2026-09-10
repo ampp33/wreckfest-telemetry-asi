@@ -1,29 +1,55 @@
 #include "io/Config.h"
 
+#include <algorithm>
+#include <cctype>
 #include <fstream>
 
 #include "json.hpp"
+#include "net/HttpClient.h"
 
 namespace wreckfest_telemetry {
 
-ApiConfig LoadConfig(const std::wstring& path) {
-    ApiConfig config;
+namespace {
+
+std::string Trim(const std::string& s) {
+    auto notSpace = [](unsigned char c) { return !std::isspace(c); };
+    auto begin = std::find_if(s.begin(), s.end(), notSpace);
+    auto end = std::find_if(s.rbegin(), s.rend(), notSpace).base();
+    if (begin >= end) return "";
+    return std::string(begin, end);
+}
+
+}  // namespace
+
+std::string LoadApiKey(const std::wstring& path) {
     std::ifstream in(path.c_str(), std::ios::binary);
-    if (!in) return config;
+    if (!in) return "";
+
+    std::string line;
+    while (std::getline(in, line)) {
+        std::string trimmed = Trim(line);
+        if (!trimmed.empty()) return trimmed;
+    }
+    return "";
+}
+
+RemoteApiDefaults FetchRemoteApiDefaults(const std::wstring& url, double timeoutSeconds) {
+    RemoteApiDefaults out;
+
+    HttpResult res = HttpGet(url, timeoutSeconds);
+    if (!res.ok) return out;
 
     nlohmann::json j;
     try {
-        in >> j;
+        j = nlohmann::json::parse(res.body);
     } catch (const nlohmann::json::exception&) {
-        return config;
+        return out;
     }
-    if (!j.is_object()) return config;
+    if (!j.is_object()) return out;
 
-    config.api_key = j.value("api_key", "");
-    config.supabase_url = j.value("supabase_url", "");
-    config.supabase_anon_key = j.value("supabase_anon_key", "");
-    config.debug_console = j.value("debug_console", false);
-    return config;
+    out.supabase_url = j.value("supabase_url", "");
+    out.supabase_anon_key = j.value("supabase_anon_key", "");
+    return out;
 }
 
 bool ApiConfigComplete(const ApiConfig& config) {
