@@ -20,11 +20,6 @@ It reads full race results, car/track/tuning data, and lap splits directly from 
    launch options, so Wine loads the real proxy DLL instead of its own built-in stub. Not needed on
    native Windows.
 
-Supabase connection details (where results get posted) are fetched automatically from
-[wfracelog.com](https://wfracelog.com/) at startup -- there's nothing to configure for that. If the
-site can't be reached, API posting is silently disabled for that run; races still get logged to
-`race_log.jsonl` either way.
-
 **Verifing it's working**: Complete a race in Wreckfest, the race log entry should appear at the top of the table in the [races](https://wfracelog.com/#/races) page.
 
 ## Building
