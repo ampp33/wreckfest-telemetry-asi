@@ -22,6 +22,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Determine version
+        run: |
+          # Tag pushes (the release path) get the tag itself, e.g. v0.1.0.
+          # A manual workflow_dispatch run isn't on a tag -- github.ref_name
+          # would just be the branch name there, so fall back to a "dev-"
+          # + short SHA build identifier instead.
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            VERSION="${GITHUB_REF_NAME}"
+          else
+            VERSION="dev-$(git rev-parse --short HEAD)"
+          fi
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
       - name: Install toolchain
         run: sudo apt-get update && sudo apt-get install -y cmake mingw-w64
 
@@ -57,25 +70,29 @@ jobs:
           curl -sL -o ual.zip https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases/download/x64-latest/version-x64.zip
           unzip -p ual.zip version.dll > dist/version.dll
 
-          cp build/wreckfest_telemetry.asi dist/scripts/
+          # Version goes in the .asi filename itself, not just the zip --
+          # once extracted into the game's install root, the zip name is
+          # gone, and this is the only way someone can tell what version
+          # they have installed later.
+          cp build/wreckfest_telemetry.asi "dist/scripts/wreckfest_telemetry-${VERSION}.asi"
           echo "your-per-user-api-key-from-settings-page" > dist/scripts/api-key.txt
 
-          cd dist && zip -r "../wreckfest-telemetry-asi-${GITHUB_REF_NAME}.zip" .
+          cd dist && zip -r "../wreckfest-telemetry-asi-${VERSION}.zip" .
 
       - name: Create release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: wreckfest-telemetry-asi-${{ github.ref_name }}.zip
+          files: wreckfest-telemetry-asi-${{ env.VERSION }}.zip
           generate_release_notes: true
           body: |
             See the [README](https://github.com/${{ github.repository }}#installing) for install
             steps: extract this zip into your Wreckfest install root -- it bundles
             [Ultimate ASI Loader](https://github.com/ThirteenAG/Ultimate-ASI-Loader) (`version.dll`)
-            and a `scripts/` folder with `wreckfest_telemetry.asi` and `api-key.txt` -- then put
-            your API key from the [settings page](https://wfracelog.com/#/settings/api-keys) into
-            `scripts/api-key.txt`, and add the `WINEDLLOVERRIDES` launch option if you're on Steam
-            Play (Proton).
+            and a `scripts/` folder with `wreckfest_telemetry-${{ env.VERSION }}.asi` and
+            `api-key.txt` -- then put your API key from the
+            [settings page](https://wfracelog.com/#/settings/api-keys) into `scripts/api-key.txt`,
+            and add the `WINEDLLOVERRIDES` launch option if you're on Steam Play (Proton).
 
       - name: Upload workflow artifact
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}

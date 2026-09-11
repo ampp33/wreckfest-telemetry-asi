@@ -99,10 +99,19 @@ void EmitRace(const RaceResult& race, const std::wstring& logPath, const ApiConf
         DebugLog(L"API post skipped: local player identity unconfirmed this race");
         return;
     }
-    if (!ApiConfigComplete(apiConfig)) return;
     auto payload = BuildApiPayload(race);
     if (!payload) {
         DebugLog(L"API post skipped: no local player identified");
+        return;
+    }
+    if (!ApiConfigComplete(apiConfig)) {
+        // Config incomplete (api-key.txt missing and/or remote
+        // config.default.json unreachable this run) -- queue rather than
+        // drop. The queue file is drained on a later run's startup once
+        // config loads successfully (see RunPollLoop's backlog drain),
+        // so nothing racing during a config outage is lost.
+        DebugLog(L"API config incomplete this run: race queued for later delivery");
+        EnqueuePayload(queuePath, *payload, "queued: API config incomplete this run (api-key.txt and/or remote config unavailable)");
         return;
     }
     PostOrQueue(apiConfig, *payload, queuePath, deadPath);
@@ -115,6 +124,23 @@ struct PollContext {
     std::wstring deadPath;
     ApiConfig apiConfig;
 };
+
+// Attempts to drain pending_races.jsonl right now (a no-op if the queue is
+// empty or the config isn't complete this run) and reschedules the
+// periodic backoff retry based on the outcome. Called both right after a
+// race completes -- a fresh success/failure is as good a reason as any to
+// retry a stale backlog immediately, rather than waiting out whatever's
+// left of the backoff window -- and from the regular backoff timer below.
+void AttemptQueueFlush(const PollContext& ctx, WorkerLoopState& state) {
+    if (!ApiConfigComplete(ctx.apiConfig)) return;
+    auto flushed = FlushQueue(ctx.apiConfig, ctx.queuePath, ctx.deadPath);
+    state.queuePending = flushed.remaining;
+    state.flushBackoffIdx = flushed.sent > 0
+                                 ? 0
+                                 : std::min(state.flushBackoffIdx + 1,
+                                            static_cast<int>(std::size(kFlushBackoffSeconds)) - 1);
+    state.nextFlushAt = SecondsFromNow(kFlushBackoffSeconds[state.flushBackoffIdx]);
+}
 
 // One full poll tick. Wrapped in SehGuarded by the caller as a coarse,
 // second line of defense beyond the fine-grained per-read guards already
@@ -193,11 +219,7 @@ void RunOneTick(const PollContext& ctx, WorkerLoopState& state) {
             }
 
             EmitRace(race, ctx.logPath, ctx.apiConfig, ctx.queuePath, ctx.deadPath, identityTrusted);
-            if (ApiConfigComplete(ctx.apiConfig)) {
-                state.queuePending = static_cast<int>(ReadQueue(ctx.queuePath).size());
-                state.flushBackoffIdx = 0;
-                state.nextFlushAt = SecondsFromNow(kFlushBackoffSeconds[0]);
-            }
+            AttemptQueueFlush(ctx, state);
             state.lastLoggedFingerprint = fingerprint;
         }
         state.lastFingerprintSeen = fingerprint;
@@ -207,13 +229,7 @@ void RunOneTick(const PollContext& ctx, WorkerLoopState& state) {
     }
 
     if (state.queuePending && std::chrono::steady_clock::now() >= state.nextFlushAt) {
-        auto flushed = FlushQueue(ctx.apiConfig, ctx.queuePath, ctx.deadPath);
-        state.queuePending = flushed.remaining;
-        state.flushBackoffIdx = flushed.sent > 0
-                                     ? 0
-                                     : std::min(state.flushBackoffIdx + 1,
-                                                static_cast<int>(std::size(kFlushBackoffSeconds)) - 1);
-        state.nextFlushAt = SecondsFromNow(kFlushBackoffSeconds[state.flushBackoffIdx]);
+        AttemptQueueFlush(ctx, state);
     }
 }
 
@@ -237,7 +253,8 @@ void RunPollLoop(HMODULE hModule) {
     ctx.apiConfig.supabase_url = remote.supabase_url;
     ctx.apiConfig.supabase_anon_key = remote.supabase_anon_key;
     if (!ApiConfigComplete(ctx.apiConfig)) {
-        DebugLog(L"API posting disabled this run: api-key.txt and/or remote config (wfracelog.com) unavailable");
+        DebugLog(L"API posting deferred this run: api-key.txt and/or remote config (wfracelog.com) unavailable "
+                 L"-- races will be queued and sent on a future run once config loads");
     }
 
     WorkerLoopState state;

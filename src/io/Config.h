@@ -27,9 +27,10 @@ struct RemoteApiDefaults {
 // https://wfracelog.com/plugin/config.default.json). On ANY failure --
 // site unreachable, non-2xx response, unparsable body, or the fields
 // simply missing from it -- both fields come back empty. Combined with
-// ApiConfigComplete() below, that silently disables API posting for the
-// rest of this run, matching the fail-quiet contract used throughout.
-// Never throws.
+// ApiConfigComplete() below, that disables *posting* for the rest of this
+// run, but races are still queued to pending_races.jsonl rather than
+// dropped (see WorkerThread's EmitRace) -- the backlog gets drained on a
+// later run once config loads successfully. Never throws.
 RemoteApiDefaults FetchRemoteApiDefaults(const std::wstring& url, double timeoutSeconds = 10.0);
 
 bool ApiConfigComplete(const ApiConfig& config);

@@ -9,7 +9,8 @@ It reads full race results, car/track/tuning data, and lap splits directly from 
 1. Download the latest release zip from the
    [Releases](https://github.com/ampp33/wreckfest-telemetry-asi/releases) page. It already bundles
    **Ultimate ASI Loader**'s `version.dll` and a `scripts/` folder containing
-   `wreckfest_telemetry.asi` and `api-key.txt`.
+   `wreckfest_telemetry-<version>.asi` (the version is baked into the filename so you can tell
+   what you have installed later) and `api-key.txt`.
 1. Extract it into your Wreckfest install root directory (next to `Wreckfest_x64.exe`), so
    `version.dll` and `scripts/` land there.
 1. Go to the [Wreckfest Race Log API Keys](https://wfracelog.com/#/settings/api-keys) page and
