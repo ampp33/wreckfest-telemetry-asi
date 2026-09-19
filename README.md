@@ -23,6 +23,14 @@ It reads full race results, car/track/tuning data, and lap splits directly from 
 
 **Verifing it's working**: Complete a race in Wreckfest, the race log entry should appear at the top of the table in the [races](https://wfracelog.com/#/races) page.
 
+## Troubleshooting
+
+1. Create an empty file named `debug.txt` in the `scripts/` folder (next to the `.asi`).
+1. Send us `scripts/debug_log.txt` (e.g. attach it to a
+   [GitHub issue](https://github.com/ampp33/wreckfest-telemetry-asi/issues)) -- it logs useful diagnostic info to help us debug your issues
+
+Delete `debug.txt` afterwards to turn logging back off.
+
 ## Building
 
 Requires CMake 3.16+ and a C++20 compiler. Either way, output is `wreckfest_telemetry.asi`.
@@ -32,12 +40,15 @@ Requires CMake 3.16+ and a C++20 compiler. Either way, output is `wreckfest_tele
 No local toolchain needed beyond Docker itself.
 
 ```bash
+mkdir -p build
 docker build -t wreckfest-telemetry-asi-builder .
 docker run --rm --user "$(id -u):$(id -g)" -v "$(pwd):/src" -v "$(pwd)/build:/src/build" \
     wreckfest-telemetry-asi-builder
 ```
 
-`--user "$(id -u):$(id -g)"` keeps the output files owned by you instead of root. Output:
+`mkdir -p build` first so the directory exists before Docker bind-mounts it -- otherwise Docker creates it
+itself owned by root, and the container's non-root user (from `--user`) can't write into it. `--user
+"$(id -u):$(id -g)"` keeps the output files owned by you instead of root. Output:
 `build/wreckfest_telemetry.asi`.
 
 ### Local

@@ -21,7 +21,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
     add_library(wreckfest_telemetry SHARED
         src/dllmain.cpp
         src/worker/WorkerThread.cpp
-        src/debug/DebugConsole.cpp
+        src/debug/DebugLog.cpp
         src/io/PluginPaths.cpp
         src/memory/SehGuard.cpp
         src/memory/ProcessMemory.cpp

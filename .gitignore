@@ -9,3 +9,5 @@ race_log.jsonl
 pending_races.jsonl
 failed_races.jsonl
 asi_loaded.txt
+debug.txt
+debug_log.txt

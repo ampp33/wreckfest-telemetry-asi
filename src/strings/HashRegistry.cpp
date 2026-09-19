@@ -1,5 +1,6 @@
 #include "strings/HashRegistry.h"
 
+#include "debug/DebugLog.h"
 #include "memory/Offsets.h"
 #include "memory/ProcessMemory.h"
 
@@ -84,6 +85,7 @@ std::optional<std::string> ResolveLocalizedString(uintptr_t moduleBase, uintptr_
                                                    const std::string& key) {
     auto bucketTablePtrOpt = ReadU64(moduleBase + LOC_HASH_TABLE_PTR_OFF);
     if (!bucketTablePtrOpt || *bucketTablePtrOpt == 0) {
+        DebugLog(L"loc-string: bucket table pointer read failed (LOC_HASH_TABLE_PTR_OFF)");
         return std::nullopt;
     }
     uintptr_t bucketTablePtr = static_cast<uintptr_t>(*bucketTablePtrOpt);
@@ -91,6 +93,7 @@ std::optional<std::string> ResolveLocalizedString(uintptr_t moduleBase, uintptr_
     auto bucketArrayBaseOpt = ReadU64(bucketTablePtr);
     auto bucketCountOpt = ReadU64(bucketTablePtr + 8);
     if (!bucketArrayBaseOpt || !*bucketArrayBaseOpt || !bucketCountOpt || !*bucketCountOpt) {
+        DebugLog(L"loc-string: bucket array base/count read failed");
         return std::nullopt;
     }
     uintptr_t bucketArrayBase = static_cast<uintptr_t>(*bucketArrayBaseOpt);
@@ -119,19 +122,23 @@ std::optional<std::string> ResolveLocalizedString(uintptr_t moduleBase, uintptr_
         ++seen;
     }
     if (!idx || *idx < 0) {
+        DebugLog((L"loc-string: key '" + WidenAscii(key) + L"' not found in hash bucket chain").c_str());
         return std::nullopt;
     }
 
     auto locSysIdxOpt = ReadI32(moduleBase + LOC_SYS_IDX_OFF);
     if (!locSysIdxOpt) {
+        DebugLog(L"loc-string: localization-system registry index read failed (LOC_SYS_IDX_OFF)");
         return std::nullopt;
     }
     auto locDataPtrOpt = ReadU64(tableBase + OBJ_ARR_OFF + static_cast<uintptr_t>(*locSysIdxOpt) * REGISTRY_STRIDE);
     if (!locDataPtrOpt || !*locDataPtrOpt) {
+        DebugLog(L"loc-string: localization-system object read failed");
         return std::nullopt;
     }
     auto locDataArrayOpt = ReadU64(*locDataPtrOpt);
     if (!locDataArrayOpt || !*locDataArrayOpt) {
+        DebugLog(L"loc-string: localization data array read failed");
         return std::nullopt;
     }
     uintptr_t entryPtr = static_cast<uintptr_t>(*locDataArrayOpt) + static_cast<uintptr_t>(*idx) * 0x60;
@@ -139,10 +146,12 @@ std::optional<std::string> ResolveLocalizedString(uintptr_t moduleBase, uintptr_
     auto segCountOpt = ReadI32(entryPtr + 0x18);
     auto segArrayBaseOpt = ReadU64(entryPtr + 0x10);
     if (!segCountOpt || *segCountOpt < 1 || !segArrayBaseOpt || !*segArrayBaseOpt) {
+        DebugLog(L"loc-string: segment count/array read failed for resolved entry");
         return std::nullopt;
     }
     auto textPtrOpt = ReadU64(*segArrayBaseOpt + 8);  // segment 0: plain, non-parameterized string
     if (!textPtrOpt || !*textPtrOpt) {
+        DebugLog(L"loc-string: text pointer read failed for segment 0");
         return std::nullopt;
     }
     return ReadCString(static_cast<uintptr_t>(*textPtrOpt), 64);
