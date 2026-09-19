@@ -30,6 +30,27 @@ std::map<std::string, std::map<std::string, std::string>> ExtractCars5Tuning(
 // codename -> human display name (e.g. "supervan" -> "Supervan").
 std::map<std::string, std::string> ExtractCars5DisplayNames(const std::vector<std::string>& chunks);
 
+struct VehicleNameEntry {
+    std::string display_name;
+    std::string codename;
+};
+
+// Looks up an exact "VEHICLE_NAME_<id>_<variant>" token -- the same one
+// ExtractCars5DisplayNames() parses out of the save file, just matched by
+// the raw key itself rather than folded into a codename -> name map. `key`
+// is meant to come from a live memory read of that same string (see
+// CarNames.cpp's LocalPlayerCarName()), letting the local player's car
+// resolve from the save file directly rather than through the game's own
+// (occasionally stale) loc-string hash table. nullopt if the key isn't
+// present in `chunks`.
+std::optional<VehicleNameEntry> FindVehicleNameKey(const std::vector<std::string>& chunks,
+                                                     const std::string& key);
+
+// FindVehicleNameKey(), but loads and decompresses cars5.ccrs itself first
+// (the same file ReadTuningFromSave() reads). nullopt on any failure (no
+// save file, key not present, ...).
+std::optional<VehicleNameEntry> FindVehicleNameKeyInSave(const std::string& key);
+
 // Exact match only -- see SaveFileTuning.cpp for why a prefix-match
 // fallback is actively dangerous here.
 std::optional<std::string> MatchCars5Codename(const std::string& carName,

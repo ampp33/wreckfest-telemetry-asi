@@ -73,6 +73,25 @@ void TestExtractCars5DisplayNames() {
     Check(names["06_supervan"] == "Supervan", "ExtractCars5DisplayNames: codename maps to display name");
 }
 
+void TestFindVehicleNameKey() {
+    auto lenPrefixed = [](const std::string& s) {
+        uint32_t len = static_cast<uint32_t>(s.size());
+        std::string out(reinterpret_cast<const char*>(&len), 4);
+        return out + s;
+    };
+    std::string chunk = "VEHICLE_NAME_12_3" + lenPrefixed("Supervan") + lenPrefixed("06_supervan:default_x");
+
+    auto found = wreckfest_telemetry::FindVehicleNameKey({chunk}, "VEHICLE_NAME_12_3");
+    Check(found.has_value(), "FindVehicleNameKey: exact key found");
+    if (found) {
+        Check(found->display_name == "Supervan", "FindVehicleNameKey: display name matches");
+        Check(found->codename == "06_supervan", "FindVehicleNameKey: codename matches");
+    }
+
+    auto missing = wreckfest_telemetry::FindVehicleNameKey({chunk}, "VEHICLE_NAME_99_9");
+    Check(!missing.has_value(), "FindVehicleNameKey: no match for a key that isn't present");
+}
+
 void TestMatchCars5CodenameExactOnly() {
     // The exact scenario wreckfest_telemetry.py's docstring warns about: a
     // prefix match would wrongly return the base car for its RS variant.
@@ -94,6 +113,7 @@ int main() {
     TestLz4RejectsGarbage();
     TestExtractCars5Tuning();
     TestExtractCars5DisplayNames();
+    TestFindVehicleNameKey();
     TestMatchCars5CodenameExactOnly();
 
     if (g_failures == 0) {

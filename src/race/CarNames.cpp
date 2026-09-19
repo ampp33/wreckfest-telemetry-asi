@@ -8,6 +8,7 @@
 #include "memory/ProcessMemory.h"
 #include "memory/SehGuard.h"
 #include "strings/HashRegistry.h"
+#include "tuning/SaveFileTuning.h"
 
 namespace wreckfest_telemetry {
 
@@ -161,7 +162,7 @@ std::optional<uintptr_t> GetCarNameTable(uintptr_t moduleBase, std::optional<int
 
 }  // namespace
 
-std::optional<std::string> LocalPlayerCarName(uintptr_t moduleBase, uintptr_t tableBase) {
+std::optional<std::string> LocalPlayerCarName(uintptr_t tableBase) {
     auto careerObj = HashRegistryLookup(tableBase, "save/career.cres");
     if (!careerObj) {
         DebugLog(L"car-name: hash-registry lookup for 'save/career.cres' failed");
@@ -208,13 +209,14 @@ std::optional<std::string> LocalPlayerCarName(uintptr_t moduleBase, uintptr_t ta
         DebugLog(L"car-name: key cstring read failed or empty");
         return std::nullopt;
     }
-    DebugLog((L"car-name: resolved key '" + WidenAscii(*key) + L"', resolving localized display name").c_str());
+    DebugLog((L"car-name: resolved key '" + WidenAscii(*key) + L"', looking it up in cars5.ccrs").c_str());
 
-    auto resolved = ResolveLocalizedString(moduleBase, tableBase, *key);
-    if (resolved) {
-        DebugLog((L"car-name: local player's car = '" + WidenAscii(*resolved) + L"'").c_str());
+    auto entry = FindVehicleNameKeyInSave(*key);
+    if (!entry) {
+        return std::nullopt;
     }
-    return resolved;
+    DebugLog((L"car-name: local player's car = '" + WidenAscii(entry->display_name) + L"'").c_str());
+    return entry->display_name;
 }
 
 std::map<int, std::string> ReadCarNames(uintptr_t moduleBase, std::optional<int> localSlot,
@@ -236,7 +238,7 @@ void ResolveCarNames(uintptr_t moduleBase, uintptr_t tableBase, std::vector<Play
     PlayerResult* localPlayer = FindLocalPlayer(players);
 
     if (localPlayer) {
-        if (auto resolved = LocalPlayerCarName(moduleBase, tableBase)) {
+        if (auto resolved = LocalPlayerCarName(tableBase)) {
             localPlayer->car = *resolved;
         }
     }

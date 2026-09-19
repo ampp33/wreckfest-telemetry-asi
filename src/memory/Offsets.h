@@ -63,9 +63,6 @@ constexpr uint64_t NAME_ARR_OFF = 0x40605c;      // table_base + this + idx*STRI
 constexpr uint64_t OBJ_ARR_OFF = 0x406040;       // table_base + this + idx*STRIDE -> object ptr
 constexpr int REGISTRY_STRIDE = 0x138;
 
-constexpr uint64_t LOC_HASH_TABLE_PTR_OFF = 0xb2e9210;  // module_base + this -> loc-string hash table ptr
-constexpr uint64_t LOC_SYS_IDX_OFF = 0xb2e91f4;         // module_base + this -> this system's registry idx
-
 constexpr uint64_t EVENT_SETTINGS_TRACK_FIELD_OFF = 0xb0;       // -> "<track>_<variation>" cstr
 constexpr uint64_t EVENT_SETTINGS_BASE_TRACK_FIELD_OFF = 0xa0;  // -> "<track>" cstr (no variation)
 constexpr uint64_t EVENT_SETTINGS_LAP_COUNT_OFF = 0x108;

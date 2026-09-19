@@ -10,9 +10,11 @@
 
 namespace wreckfest_telemetry {
 
-// The local player's own car, via the career-save/garage/loc-string chain
-// (byte-exact display name, e.g. "RoadSlayer"). Call once per new race.
-std::optional<std::string> LocalPlayerCarName(uintptr_t moduleBase, uintptr_t tableBase);
+// The local player's own car: resolves a live "VEHICLE_NAME_<id>_<variant>"
+// key via the career-save/garage chain, then looks that exact key up in
+// cars5.ccrs for its display name (byte-exact, e.g. "RoadSlayer"). Call once
+// per new race.
+std::optional<std::string> LocalPlayerCarName(uintptr_t tableBase);
 
 // slot_index -> car name (Title Case) for every populated slot in the
 // roster car-name table. Needs the local player's slot + already-resolved

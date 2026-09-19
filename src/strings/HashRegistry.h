@@ -16,9 +16,4 @@ std::optional<uintptr_t> GetTableBase(uintptr_t moduleBase);
 // name through the hash registry.
 std::optional<uintptr_t> HashRegistryLookup(uintptr_t tableBase, const std::string& name);
 
-// Resolves a localization key to its display text via the engine's
-// separate loc-string hash table.
-std::optional<std::string> ResolveLocalizedString(uintptr_t moduleBase, uintptr_t tableBase,
-                                                   const std::string& key);
-
 }  // namespace wreckfest_telemetry

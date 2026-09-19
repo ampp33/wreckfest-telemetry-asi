@@ -30,6 +30,71 @@ std::string NarrowPath(const std::wstring& wide) {
     return out;
 }
 
+// Walks every well-formed "VEHICLE_NAME_<id>_<variant>" token in `chunks`,
+// calling `visit(rawKey, displayName, codename)` for each -- shared by
+// ExtractCars5DisplayNames() (folds every token into a codename -> name map)
+// and FindVehicleNameKey() (stops at the first token matching one specific
+// key). `visit` returns false to stop scanning early.
+template <typename Visitor>
+void ForEachVehicleNameToken(const std::vector<std::string>& chunks, Visitor visit) {
+    static const std::string kPrefix = "VEHICLE_NAME_";
+
+    for (const auto& chunk : chunks) {
+        size_t pos = 0;
+        while ((pos = chunk.find(kPrefix, pos)) != std::string::npos) {
+            size_t p = pos + kPrefix.size();
+            size_t d1Start = p;
+            while (p < chunk.size() && std::isdigit(static_cast<unsigned char>(chunk[p]))) ++p;
+            if (p == d1Start || p >= chunk.size() || chunk[p] != '_') {
+                ++pos;
+                continue;
+            }
+            ++p;
+            size_t d2Start = p;
+            while (p < chunk.size() && std::isdigit(static_cast<unsigned char>(chunk[p]))) ++p;
+            if (p == d2Start) {
+                ++pos;
+                continue;
+            }
+            // p now marks the end of the "VEHICLE_NAME_<id>_<variant>" token
+            // -- immediately followed by two length-prefixed fields: display
+            // name, then "<codename>:default...".
+            if (p + 4 > chunk.size()) {
+                pos = p;
+                continue;
+            }
+            uint32_t nameLen;
+            std::memcpy(&nameLen, chunk.data() + p, 4);
+            if (nameLen == 0 || nameLen >= 64 || p + 4 + nameLen > chunk.size()) {
+                pos = p;
+                continue;
+            }
+            std::string displayName = chunk.substr(p + 4, nameLen);
+            size_t q = p + 4 + nameLen;
+
+            if (q + 4 > chunk.size()) {
+                pos = p;
+                continue;
+            }
+            uint32_t codeLen;
+            std::memcpy(&codeLen, chunk.data() + q, 4);
+            if (codeLen == 0 || codeLen >= 64 || q + 4 + codeLen > chunk.size()) {
+                pos = p;
+                continue;
+            }
+            std::string codeField = chunk.substr(q + 4, codeLen);
+            std::string codename = codeField.substr(0, codeField.find(':'));
+
+            std::string rawKey = chunk.substr(pos, p - pos);
+            pos = q + 4 + codeLen;
+
+            if (!visit(rawKey, displayName, codename)) {
+                return;
+            }
+        }
+    }
+}
+
 }  // namespace
 
 std::optional<std::vector<std::string>> DecompressCars5Chunks(const std::string& buf) {
@@ -125,59 +190,25 @@ std::map<std::string, std::map<std::string, std::string>> ExtractCars5Tuning(
 }
 
 std::map<std::string, std::string> ExtractCars5DisplayNames(const std::vector<std::string>& chunks) {
-    static const std::string kPrefix = "VEHICLE_NAME_";
     std::map<std::string, std::string> names;
-
-    for (const auto& chunk : chunks) {
-        size_t pos = 0;
-        while ((pos = chunk.find(kPrefix, pos)) != std::string::npos) {
-            size_t p = pos + kPrefix.size();
-            size_t d1Start = p;
-            while (p < chunk.size() && std::isdigit(static_cast<unsigned char>(chunk[p]))) ++p;
-            if (p == d1Start || p >= chunk.size() || chunk[p] != '_') {
-                ++pos;
-                continue;
-            }
-            ++p;
-            size_t d2Start = p;
-            while (p < chunk.size() && std::isdigit(static_cast<unsigned char>(chunk[p]))) ++p;
-            if (p == d2Start) {
-                ++pos;
-                continue;
-            }
-            // Match end -- immediately followed by two length-prefixed
-            // fields: display name, then "<codename>:default...".
-            if (p + 4 > chunk.size()) {
-                pos = p;
-                continue;
-            }
-            uint32_t nameLen;
-            std::memcpy(&nameLen, chunk.data() + p, 4);
-            if (nameLen == 0 || nameLen >= 64 || p + 4 + nameLen > chunk.size()) {
-                pos = p;
-                continue;
-            }
-            std::string displayName = chunk.substr(p + 4, nameLen);
-            size_t q = p + 4 + nameLen;
-
-            if (q + 4 > chunk.size()) {
-                pos = p;
-                continue;
-            }
-            uint32_t codeLen;
-            std::memcpy(&codeLen, chunk.data() + q, 4);
-            if (codeLen == 0 || codeLen >= 64 || q + 4 + codeLen > chunk.size()) {
-                pos = p;
-                continue;
-            }
-            std::string codeField = chunk.substr(q + 4, codeLen);
-            std::string codename = codeField.substr(0, codeField.find(':'));
-
-            names[codename] = displayName;
-            pos = q + 4 + codeLen;
-        }
-    }
+    ForEachVehicleNameToken(chunks, [&](const std::string&, const std::string& displayName,
+                                         const std::string& codename) {
+        names[codename] = displayName;
+        return true;
+    });
     return names;
+}
+
+std::optional<VehicleNameEntry> FindVehicleNameKey(const std::vector<std::string>& chunks,
+                                                     const std::string& key) {
+    std::optional<VehicleNameEntry> result;
+    ForEachVehicleNameToken(chunks, [&](const std::string& rawKey, const std::string& displayName,
+                                         const std::string& codename) {
+        if (rawKey != key) return true;
+        result = VehicleNameEntry{displayName, codename};
+        return false;
+    });
+    return result;
 }
 
 std::optional<std::string> MatchCars5Codename(const std::string& carName,
@@ -234,38 +265,66 @@ std::map<std::string, int> ResolveTuningIndices(const std::vector<std::string>& 
     return result;
 }
 
-std::map<std::string, int> ReadTuningFromSave(const std::string& carName) {
-    if (carName.empty()) return {};
+namespace {
 
+// Shared by ReadTuningFromSave() and FindVehicleNameKeyInSave() -- both need
+// the same decompressed cars5.ccrs contents, just extracted differently.
+std::optional<std::vector<std::string>> LoadCars5Chunks() {
     auto path = FindCars5Path();
     if (!path) {
-        DebugLog(L"tuning: cars5.ccrs path not found (Steam userdata glob missed)");
-        return {};
+        DebugLog(L"cars5.ccrs: path not found (Steam userdata glob missed)");
+        return std::nullopt;
     }
-    DebugLog((L"tuning: using cars5.ccrs at '" + *path + L"'").c_str());
+    DebugLog((L"cars5.ccrs: using file at '" + *path + L"'").c_str());
 
     std::ifstream in(NarrowPath(*path), std::ios::binary);
     if (!in) {
-        DebugLog(L"tuning: failed to open cars5.ccrs for reading");
-        return {};
+        DebugLog(L"cars5.ccrs: failed to open for reading");
+        return std::nullopt;
     }
     std::string buf((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
     if (buf.empty()) {
-        DebugLog(L"tuning: cars5.ccrs read as empty");
-        return {};
+        DebugLog(L"cars5.ccrs: read as empty");
+        return std::nullopt;
     }
 
     auto chunks = DecompressCars5Chunks(buf);
     if (!chunks) {
-        DebugLog(L"tuning: failed to decompress cars5.ccrs (unexpected header or LZ4 chunk)");
-        return {};
+        DebugLog(L"cars5.ccrs: failed to decompress (unexpected header or LZ4 chunk)");
     }
+    return chunks;
+}
+
+}  // namespace
+
+std::map<std::string, int> ReadTuningFromSave(const std::string& carName) {
+    if (carName.empty()) return {};
+
+    auto chunks = LoadCars5Chunks();
+    if (!chunks) return {};
 
     auto result = ResolveTuningIndices(*chunks, carName);
     DebugLog((L"tuning: resolved " + std::to_wstring(result.size()) + L" field(s) for '" +
               WidenAscii(carName) + L"'")
                  .c_str());
     return result;
+}
+
+std::optional<VehicleNameEntry> FindVehicleNameKeyInSave(const std::string& key) {
+    if (key.empty()) return std::nullopt;
+
+    auto chunks = LoadCars5Chunks();
+    if (!chunks) return std::nullopt;
+
+    auto entry = FindVehicleNameKey(*chunks, key);
+    if (!entry) {
+        DebugLog((L"cars5.ccrs: no vehicle-name entry for key '" + WidenAscii(key) + L"'").c_str());
+    } else {
+        DebugLog((L"cars5.ccrs: key '" + WidenAscii(key) + L"' -> '" + WidenAscii(entry->display_name) +
+                  L"' (codename '" + WidenAscii(entry->codename) + L"')")
+                     .c_str());
+    }
+    return entry;
 }
 
 }  // namespace wreckfest_telemetry
