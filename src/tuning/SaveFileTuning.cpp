@@ -202,12 +202,21 @@ std::map<std::string, std::string> ExtractCars5DisplayNames(const std::vector<st
 std::optional<VehicleNameEntry> FindVehicleNameKey(const std::vector<std::string>& chunks,
                                                      const std::string& key) {
     std::optional<VehicleNameEntry> result;
+    int total = 0;
     ForEachVehicleNameToken(chunks, [&](const std::string& rawKey, const std::string& displayName,
                                          const std::string& codename) {
+        ++total;
         if (rawKey != key) return true;
         result = VehicleNameEntry{displayName, codename};
         return false;
     });
+    if (!result) {
+        // Stops early on a match, so `total` here is the FULL count -- the
+        // whole file was scanned without finding `key`.
+        DebugLog((L"cars5.ccrs: key '" + WidenAscii(key) + L"' not found among " + std::to_wstring(total) +
+                  L" vehicle-name token(s) in the file")
+                     .c_str());
+    }
     return result;
 }
 
@@ -317,9 +326,7 @@ std::optional<VehicleNameEntry> FindVehicleNameKeyInSave(const std::string& key)
     if (!chunks) return std::nullopt;
 
     auto entry = FindVehicleNameKey(*chunks, key);
-    if (!entry) {
-        DebugLog((L"cars5.ccrs: no vehicle-name entry for key '" + WidenAscii(key) + L"'").c_str());
-    } else {
+    if (entry) {
         DebugLog((L"cars5.ccrs: key '" + WidenAscii(key) + L"' -> '" + WidenAscii(entry->display_name) +
                   L"' (codename '" + WidenAscii(entry->codename) + L"')")
                      .c_str());
