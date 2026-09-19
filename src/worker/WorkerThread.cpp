@@ -9,7 +9,7 @@
 #include <tuple>
 #include <vector>
 
-#include "debug/DebugConsole.h"
+#include "debug/DebugLog.h"
 #include "io/Config.h"
 #include "io/JsonlLog.h"
 #include "io/PluginPaths.h"
@@ -37,12 +37,6 @@ constexpr double kPollIntervalSeconds = 0.5;
 // WinHTTP's redirect-following. FetchRemoteApiDefaults() degrades to an
 // empty result (API posting disabled for the run) if it can't be reached.
 const wchar_t kRemoteConfigUrl[] = L"https://wfracelog.com/plugin/config.default.json";
-
-// Widens an ASCII literal for DebugLog -- not for arbitrary UTF-8 content
-// (player/track names), just our own fixed debug strings.
-std::wstring WidenAscii(const std::string& s) {
-    return std::wstring(s.begin(), s.end());
-}
 
 std::chrono::steady_clock::time_point SecondsFromNow(double seconds) {
     return std::chrono::steady_clock::now() +
@@ -177,6 +171,15 @@ void RunOneTick(const PollContext& ctx, WorkerLoopState& state) {
         if (raceFinal && isStable && (!state.lastLoggedFingerprint || *state.lastLoggedFingerprint != fingerprint)) {
             if (tableBase) {
                 ResolveCarNames(ctx.base, *tableBase, players);
+                int withCar = 0;
+                for (const auto& p : players) {
+                    if (!p.car.empty()) ++withCar;
+                }
+                DebugLog((L"car names: resolved for " + std::to_wstring(withCar) + L"/" +
+                          std::to_wstring(players.size()) + L" player(s)")
+                             .c_str());
+            } else {
+                DebugLog(L"car names: skipped -- hash-registry table base not resolved");
             }
             state.lapSplits.Resolve(players);
 
@@ -198,6 +201,9 @@ void RunOneTick(const PollContext& ctx, WorkerLoopState& state) {
             std::map<std::string, int> tuning;
             if (local && !local->car.empty()) {
                 tuning = ReadTuningFromSave(local->car);
+            } else {
+                DebugLog(L"tuning: skipped -- no local player identified, or local player's car "
+                         L"name is empty");
             }
 
             RaceResult race;
@@ -244,10 +250,17 @@ void RunPollLoop(HMODULE hModule) {
     ctx.logPath = PluginFilePath(hModule, L"race_log.jsonl");
     ctx.queuePath = PluginFilePath(hModule, L"pending_races.jsonl");
     ctx.deadPath = PluginFilePath(hModule, L"failed_races.jsonl");
-    // TODO: no flag currently wired up to EnableDebugConsole() -- a new way
-    // to opt into it is coming; DebugLog() calls below stay as no-ops until
-    // then (see DebugConsole.cpp: it's silent unless the console was
-    // enabled).
+
+    // Opt-in diagnostics: a `debug.txt` marker file dropped next to the .asi
+    // (same directory as the files above) turns on verbose logging to
+    // debug_log.txt for this session -- see README's troubleshooting
+    // section. DebugLog() calls everywhere else stay no-ops otherwise.
+    std::wstring debugMarker = PluginFilePath(hModule, L"debug.txt");
+    if (!debugMarker.empty() && GetFileAttributesW(debugMarker.c_str()) != INVALID_FILE_ATTRIBUTES) {
+        InitDebugLog(PluginFilePath(hModule, L"debug_log.txt"));
+        DebugLog(L"debug logging enabled (debug.txt marker found)");
+    }
+
     ctx.apiConfig.api_key = LoadApiKey(PluginFilePath(hModule, L"api-key.txt"));
     RemoteApiDefaults remote = FetchRemoteApiDefaults(kRemoteConfigUrl);
     ctx.apiConfig.supabase_url = remote.supabase_url;

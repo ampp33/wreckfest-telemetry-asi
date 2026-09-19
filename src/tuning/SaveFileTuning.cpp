@@ -7,6 +7,7 @@
 #include <fstream>
 #include <iterator>
 
+#include "debug/DebugLog.h"
 #include "tuning/Lz4Block.h"
 
 namespace wreckfest_telemetry {
@@ -193,10 +194,23 @@ std::map<std::string, int> ResolveTuningIndices(const std::vector<std::string>& 
 
     auto cars = ExtractCars5Tuning(chunks);
     auto displayNames = ExtractCars5DisplayNames(chunks);
+    DebugLog((L"tuning: extracted " + std::to_wstring(displayNames.size()) + L" display name(s) and " +
+              std::to_wstring(cars.size()) + L" car tuning record(s) from cars5.ccrs")
+                 .c_str());
     auto codename = MatchCars5Codename(carName, displayNames);
-    if (!codename) return result;
+    if (!codename) {
+        DebugLog((L"tuning: no codename in cars5.ccrs matches display name '" + WidenAscii(carName) +
+                  L"' exactly")
+                     .c_str());
+        return result;
+    }
     auto carIt = cars.find(*codename);
-    if (carIt == cars.end()) return result;
+    if (carIt == cars.end()) {
+        DebugLog((L"tuning: matched codename '" + WidenAscii(*codename) +
+                  L"' but no tuning record found for it")
+                     .c_str());
+        return result;
+    }
 
     struct PresetEntry {
         std::string key;
@@ -224,17 +238,34 @@ std::map<std::string, int> ReadTuningFromSave(const std::string& carName) {
     if (carName.empty()) return {};
 
     auto path = FindCars5Path();
-    if (!path) return {};
+    if (!path) {
+        DebugLog(L"tuning: cars5.ccrs path not found (Steam userdata glob missed)");
+        return {};
+    }
+    DebugLog((L"tuning: using cars5.ccrs at '" + *path + L"'").c_str());
 
     std::ifstream in(NarrowPath(*path), std::ios::binary);
-    if (!in) return {};
+    if (!in) {
+        DebugLog(L"tuning: failed to open cars5.ccrs for reading");
+        return {};
+    }
     std::string buf((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-    if (buf.empty()) return {};
+    if (buf.empty()) {
+        DebugLog(L"tuning: cars5.ccrs read as empty");
+        return {};
+    }
 
     auto chunks = DecompressCars5Chunks(buf);
-    if (!chunks) return {};
+    if (!chunks) {
+        DebugLog(L"tuning: failed to decompress cars5.ccrs (unexpected header or LZ4 chunk)");
+        return {};
+    }
 
-    return ResolveTuningIndices(*chunks, carName);
+    auto result = ResolveTuningIndices(*chunks, carName);
+    DebugLog((L"tuning: resolved " + std::to_wstring(result.size()) + L" field(s) for '" +
+              WidenAscii(carName) + L"'")
+                 .c_str());
+    return result;
 }
 
 }  // namespace wreckfest_telemetry
