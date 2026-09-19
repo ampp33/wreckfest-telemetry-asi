@@ -1,5 +1,8 @@
 #include "strings/HashRegistry.h"
 
+#include <iomanip>
+#include <sstream>
+
 #include "debug/DebugLog.h"
 #include "memory/Offsets.h"
 #include "memory/ProcessMemory.h"
@@ -11,6 +14,14 @@ using namespace offsets;
 namespace {
 constexpr uint32_t HASH_MUL = 0x5bd1e995u;
 std::optional<uintptr_t> g_tableBaseCache;
+
+// Diagnostic-only hex formatting for DebugLog -- not used by any actual
+// lookup logic.
+std::wstring ToHexW(uint64_t v) {
+    std::wostringstream ss;
+    ss << std::hex << v;
+    return ss.str();
+}
 }  // namespace
 
 uint32_t WfHash(const std::string& data, uint32_t seed) {
@@ -98,9 +109,15 @@ std::optional<std::string> ResolveLocalizedString(uintptr_t moduleBase, uintptr_
     }
     uintptr_t bucketArrayBase = static_cast<uintptr_t>(*bucketArrayBaseOpt);
     uint64_t bucketCount = *bucketCountOpt;
+    DebugLog((L"loc-string: bucket table array_base=0x" + ToHexW(bucketArrayBase) + L" bucket_count=" +
+              std::to_wstring(bucketCount))
+                 .c_str());
 
     uint32_t h = WfHash(key);
     uint64_t bucket = h % bucketCount;
+    DebugLog((L"loc-string: key '" + WidenAscii(key) + L"' hash=0x" + ToHexW(h) + L" -> bucket " +
+              std::to_wstring(bucket) + L"/" + std::to_wstring(bucketCount))
+                 .c_str());
     auto nodeOpt = ReadU64(bucketArrayBase + bucket * 8);
     uintptr_t node = nodeOpt ? static_cast<uintptr_t>(*nodeOpt) : 0;
     size_t maxlen = key.size() + 4;
@@ -113,6 +130,16 @@ std::optional<std::string> ResolveLocalizedString(uintptr_t moduleBase, uintptr_
         if (keyPtrOpt && *keyPtrOpt != 0) {
             cand = ReadCString(static_cast<uintptr_t>(*keyPtrOpt), maxlen);
         }
+        if (seen < 8) {
+            // Diagnostic-only re-read at a generous length -- `cand` above is
+            // capped to key.size()+4 (fine for the equality check, but too
+            // short to show what's actually sitting in this bucket).
+            std::optional<std::string> full =
+                (keyPtrOpt && *keyPtrOpt != 0) ? ReadCString(static_cast<uintptr_t>(*keyPtrOpt), 64) : std::nullopt;
+            DebugLog((L"loc-string: bucket chain[" + std::to_wstring(seen) + L"] = '" +
+                      (full ? WidenAscii(*full) : L"<unreadable>") + L"'")
+                         .c_str());
+        }
         if (cand && *cand == key) {
             idx = ReadI32(node + 0x10);
             break;
@@ -122,7 +149,9 @@ std::optional<std::string> ResolveLocalizedString(uintptr_t moduleBase, uintptr_
         ++seen;
     }
     if (!idx || *idx < 0) {
-        DebugLog((L"loc-string: key '" + WidenAscii(key) + L"' not found in hash bucket chain").c_str());
+        DebugLog((L"loc-string: key '" + WidenAscii(key) + L"' not found in hash bucket chain (" +
+                  std::to_wstring(seen) + L" node(s) walked)")
+                     .c_str());
         return std::nullopt;
     }
 
