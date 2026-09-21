@@ -69,4 +69,30 @@ constexpr uint64_t EVENT_SETTINGS_LAP_COUNT_OFF = 0x108;
 constexpr uint64_t EVENT_SETTINGS_OPPONENTS_OFF = 0x10c;
 constexpr uint64_t ENVIRONMENT_SYS_IDX_OFF = 0x18fbd08;  // module_base + this -> registry idx for track/environment system
 
+// Driving-assist difficulty settings. Resolved through the hash registry by
+// a name that is literally the persisted save file's own path
+// ("save/assists.aids") -- this is the live object that file gets loaded
+// into, a global settings singleton (unlike the Tune screen's per-widget
+// objects, present for the whole session regardless of whether the Assists
+// options screen was ever opened). All four fields are plain int32, no
+// widget-hash indirection needed. Full 0-2 range verified live for all four
+// by cycling each setting on-screen one step at a time.
+constexpr const char* ASSISTS_REGISTRY_NAME = "save/assists.aids";
+constexpr uint64_t ASSIST_SHIFTING_OFF = 0x00;   // 0=automatic, 1=manual, 2=manual+clutch
+constexpr uint64_t ASSIST_ABS_OFF = 0x04;        // 0=off, 1=half, 2=full
+constexpr uint64_t ASSIST_TCS_OFF = 0x08;        // 0=off, 1=half, 2=full
+constexpr uint64_t ASSIST_STABILITY_OFF = 0x0c;  // 0=off, 1=half, 2=full
+
+// Local player's current vehicle weight (kg), a plain float32. Resolved
+// through the hash registry to a "career-carstats-temp" object -- the same
+// per-car stats block that backs the Performance/Upgrades screen's stat
+// panel (a horsepower-vs-RPM curve sits immediately before this field in
+// the same struct). Despite the "-temp" in its name, verified live that it
+// tracks whichever car is currently selected in the career garage (not a
+// stale UI cache tied to the last-opened Performance screen), and survives
+// through an entire race, reading correctly at the post-race results
+// screen.
+constexpr const char* CARSTATS_REGISTRY_NAME = "career-carstats-temp";
+constexpr uint64_t CARSTATS_WEIGHT_OFF = 0x64;
+
 }  // namespace wreckfest_telemetry::offsets

@@ -38,6 +38,14 @@ struct RaceResult {
     std::map<std::string, int> tuning;  // category -> 0-4 index
     int lap_count = 0;
     int opponent_count = 0;
+    // Driving-assist difficulty settings in effect for this race -- see
+    // AssistSettings.h. Empty if unresolved, omitted from output rather
+    // than exported as misleading defaults.
+    std::map<std::string, std::string> assists;
+    // Local player's vehicle weight in kg -- see VehicleWeight.h. 0 means
+    // "not resolved", omitted from output rather than exported as a
+    // misleading zero.
+    int vehicle_weight_kg = 0;
 };
 
 inline char ClassFromRating(int rating) {

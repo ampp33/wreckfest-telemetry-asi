@@ -25,7 +25,10 @@ bool AppendRaceLog(const RaceResult& race, const std::wstring& logPath, bool opp
 // The API POST body. nullopt if no local player was identified (caller
 // skips posting). Tuning categories are 0-4 internally, sent 1-5; a
 // category/lap_count/lap_times_ms with nothing to report is omitted
-// entirely, not sent as a null/empty placeholder.
+// entirely, not sent as a null/empty placeholder. Driving-assist settings
+// (shifting/abs/traction_control/stability_control), when resolved, are
+// sent as a single nested "assists" object rather than flattened top-level
+// keys like the tuning categories.
 std::optional<nlohmann::json> BuildApiPayload(const RaceResult& race);
 
 }  // namespace wreckfest_telemetry
