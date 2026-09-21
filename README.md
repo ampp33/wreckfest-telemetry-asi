@@ -2,7 +2,7 @@
 
 Auto-loading ASI plugin that reads your Wreckfest race results live, straight out of the game's own memory, and prints/logs/POSTs each completed race automatically.  This is meant to be paired with the [Wreckfest Race Log](https://wfracelog.com/) site to automatically log and track your races.
 
-It reads full race results, car/track/tuning data, and lap splits directly from the game's own memory, logs every finished race to `race_log.jsonl`, and optionally posts results to [Wreckfest Race Log](https://wfracelog.com/), with an offline retry queue.
+It reads full race results, car/track/tuning/assist-settings/weight data, and lap splits directly from the game's own memory, logs every finished race to `race_log.jsonl`, and optionally posts results to [Wreckfest Race Log](https://wfracelog.com/), with an offline retry queue.
 
 ## Installation
 

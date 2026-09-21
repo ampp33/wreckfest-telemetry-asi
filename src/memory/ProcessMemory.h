@@ -30,6 +30,7 @@ std::vector<MemoryRegion> EnumerateWritableRegions();
 // memory/SehGuard.h.
 std::optional<int32_t> ReadI32(uintptr_t addr);
 std::optional<uint64_t> ReadU64(uintptr_t addr);
+std::optional<float> ReadF32(uintptr_t addr);
 
 // Reads up to maxLen bytes at addr and stops at the first NUL. Returns
 // nullopt if the read faults before a NUL is found within maxLen bytes.

@@ -20,8 +20,10 @@
 #include "race/LapSplits.h"
 #include "race/PlayerScraper.h"
 #include "race/RaceFinality.h"
+#include "strings/AssistSettings.h"
 #include "strings/HashRegistry.h"
 #include "strings/TrackDetection.h"
+#include "strings/VehicleWeight.h"
 #include "tuning/SaveFileTuning.h"
 
 namespace wreckfest_telemetry {
@@ -189,9 +191,15 @@ void RunOneTick(const PollContext& ctx, WorkerLoopState& state) {
             std::string variation;
             int lapCount = 0;
             int opponentCount = 0;
+            std::map<std::string, std::string> assists;
+            int vehicleWeightKg = 0;
             if (tableBase) {
                 std::tie(track, variation) = DetectTrackAndVariation(ctx.base, *tableBase);
                 std::tie(lapCount, opponentCount) = ReadRaceSettings(*tableBase);
+                assists = ReadAssistSettings(*tableBase);
+                DebugLog((L"assists: " + std::to_wstring(assists.size()) + L" of 4 settings resolved").c_str());
+                vehicleWeightKg = ReadVehicleWeight(*tableBase);
+                DebugLog((L"vehicle weight: " + std::to_wstring(vehicleWeightKg) + L" kg").c_str());
             }
 
             // Live Tune-screen widget reads (Phase 7) aren't ported yet --
@@ -213,6 +221,8 @@ void RunOneTick(const PollContext& ctx, WorkerLoopState& state) {
             race.variation = variation;
             race.timestamp = NowTimestamp();
             race.tuning = tuning;
+            race.assists = assists;
+            race.vehicle_weight_kg = vehicleWeightKg;
             race.players = players;
 
             bool identityTrusted = true;

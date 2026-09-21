@@ -60,6 +60,8 @@ nlohmann::json RaceToDict(const RaceResult& race, bool opponentLaps) {
     };
     if (race.lap_count) d["lap_count"] = race.lap_count;
     if (race.opponent_count) d["opponent_count"] = race.opponent_count;
+    if (!race.assists.empty()) d["assists"] = race.assists;
+    if (race.vehicle_weight_kg) d["vehicle_weight_kg"] = race.vehicle_weight_kg;
 
     nlohmann::json othersArr = nlohmann::json::array();
     for (const auto* p : others) othersArr.push_back(PlayerToDict(*p, opponentLaps));
@@ -93,6 +95,8 @@ std::optional<nlohmann::json> BuildApiPayload(const RaceResult& race) {
 
     if (race.lap_count) payload["lap_count"] = race.lap_count;
     if (!local->lap_times_ms.empty()) payload["lap_times_ms"] = local->lap_times_ms;
+    if (!race.assists.empty()) payload["assists"] = race.assists;
+    if (race.vehicle_weight_kg) payload["vehicle_weight_kg"] = race.vehicle_weight_kg;
 
     std::vector<const PlayerResult*> rosterPlayers;
     rosterPlayers.reserve(race.players.size());

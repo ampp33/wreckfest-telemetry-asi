@@ -39,6 +39,10 @@ std::optional<uint64_t> ReadU64(uintptr_t addr) {
     return SehGuarded([addr] { return *reinterpret_cast<volatile uint64_t*>(addr); });
 }
 
+std::optional<float> ReadF32(uintptr_t addr) {
+    return SehGuarded([addr] { return *reinterpret_cast<volatile float*>(addr); });
+}
+
 std::optional<std::string> ReadCString(uintptr_t addr, size_t maxLen) {
     auto raw = SehGuarded([addr, maxLen] {
         std::string s;
