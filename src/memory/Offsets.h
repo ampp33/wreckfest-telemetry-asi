@@ -95,4 +95,22 @@ constexpr uint64_t ASSIST_STABILITY_OFF = 0x0c;  // 0=off, 1=half, 2=full
 constexpr const char* CARSTATS_REGISTRY_NAME = "career-carstats-temp";
 constexpr uint64_t CARSTATS_WEIGHT_OFF = 0x64;
 
+// Tune-screen sliders resolve through the hash registry as
+// "menu/element/<fnv1a("TUNE_SLIDER_<CATEGORY>_TRACK")>"; the current value
+// is a normalized float (index / TUNE_MAX_INDEX) at +0x320 on that widget.
+// Widgets only hold real values once their tab has been visited.
+constexpr uint64_t TUNE_TRACK_VALUE_OFF = 0x320;
+constexpr int TUNE_MAX_INDEX = 4;
+
+// DIFFERENTIAL has no slider registry entry. All four categories' indices
+// instead live in one transient heap array of four 0x50-byte structs
+// (SUSPENSION, GEARING, DIFFERENTIAL, BRAKES): magic @+0x0, sequential id
+// @+0x4, 0-4 index @+0x18. Nothing points at it, so it is found by
+// structural signature near a resolved slider widget, and it is freed on
+// leaving the Tune screen.
+constexpr int32_t TUNE_ARR_MAGIC = 0x00090005;
+constexpr uint64_t TUNE_ARR_STRIDE = 0x50;
+constexpr uint64_t TUNE_ARR_ID_OFF = 0x4;
+constexpr uint64_t TUNE_ARR_VAL_OFF = 0x18;
+
 }  // namespace wreckfest_telemetry::offsets

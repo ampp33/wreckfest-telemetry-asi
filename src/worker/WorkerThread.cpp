@@ -24,7 +24,7 @@
 #include "strings/HashRegistry.h"
 #include "strings/TrackDetection.h"
 #include "strings/VehicleWeight.h"
-#include "tuning/SaveFileTuning.h"
+#include "tuning/LiveTuning.h"
 
 namespace wreckfest_telemetry {
 
@@ -202,16 +202,13 @@ void RunOneTick(const PollContext& ctx, WorkerLoopState& state) {
                 DebugLog((L"vehicle weight: " + std::to_wstring(vehicleWeightKg) + L" kg").c_str());
             }
 
-            // Live Tune-screen widget reads (Phase 7) aren't ported yet --
-            // save-file tuning alone can lag a just-changed setting until
-            // the Tune screen is backed out of, a known, accepted gap
-            // until that phase lands.
+            // Live Tune-screen read first: cars5.ccrs lags a just-changed
+            // setting until the Tune screen is backed out of.
             std::map<std::string, int> tuning;
-            if (local && !local->car.empty()) {
-                tuning = ReadTuningFromSave(local->car);
+            if (local) {
+                tuning = ReadTuningForRace(tableBase ? *tableBase : 0, local->car);
             } else {
-                DebugLog(L"tuning: skipped -- no local player identified, or local player's car "
-                         L"name is empty");
+                DebugLog(L"tuning: skipped -- no local player identified");
             }
 
             RaceResult race;
