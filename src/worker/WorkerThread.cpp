@@ -165,6 +165,21 @@ void RunOneTick(const PollContext& ctx, WorkerLoopState& state) {
         // (never watched from the start), so emitting it would be a
         // strictly worse duplicate of whatever's already in the log from
         // a prior session.
+        //
+        // KNOWN BUG (not yet fixed): firstPoll only clears here, on the
+        // first tick with a visible player -- not on the plugin's actual
+        // first poll -- so this can adopt (silently drop) a race the plugin
+        // watched from the start. A racer only becomes visible once they
+        // have a valid best lap, so in a SOLO 1-LAP race run as the first
+        // race of a game session, the local player first appears at the
+        // finish line, already final. Observed live 2026-09-26 (Bloomfield
+        // Figure 8, solo): never logged; the next race in the same session
+        // logged normally. Multi-lap races and races with other racers
+        // still out on track are unaffected. Carried over from the Python
+        // tool, where attaching mid-session makes this rule necessary; the
+        // ASI loads with the game, so its first poll is always in the
+        // menus. Likely fix: clear firstPoll after the first tick
+        // regardless of whether any players were visible.
         if (state.firstPoll && raceFinal) {
             state.lastLoggedFingerprint = fingerprint;
         }
