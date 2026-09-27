@@ -24,7 +24,7 @@
 #include "strings/HashRegistry.h"
 #include "strings/TrackDetection.h"
 #include "strings/VehicleWeight.h"
-#include "tuning/SaveFileTuning.h"
+#include "tuning/LiveTuning.h"
 
 namespace wreckfest_telemetry {
 
@@ -165,6 +165,21 @@ void RunOneTick(const PollContext& ctx, WorkerLoopState& state) {
         // (never watched from the start), so emitting it would be a
         // strictly worse duplicate of whatever's already in the log from
         // a prior session.
+        //
+        // KNOWN BUG (not yet fixed): firstPoll only clears here, on the
+        // first tick with a visible player -- not on the plugin's actual
+        // first poll -- so this can adopt (silently drop) a race the plugin
+        // watched from the start. A racer only becomes visible once they
+        // have a valid best lap, so in a SOLO 1-LAP race run as the first
+        // race of a game session, the local player first appears at the
+        // finish line, already final. Observed live 2026-09-26 (Bloomfield
+        // Figure 8, solo): never logged; the next race in the same session
+        // logged normally. Multi-lap races and races with other racers
+        // still out on track are unaffected. Carried over from the Python
+        // tool, where attaching mid-session makes this rule necessary; the
+        // ASI loads with the game, so its first poll is always in the
+        // menus. Likely fix: clear firstPoll after the first tick
+        // regardless of whether any players were visible.
         if (state.firstPoll && raceFinal) {
             state.lastLoggedFingerprint = fingerprint;
         }
@@ -202,16 +217,13 @@ void RunOneTick(const PollContext& ctx, WorkerLoopState& state) {
                 DebugLog((L"vehicle weight: " + std::to_wstring(vehicleWeightKg) + L" kg").c_str());
             }
 
-            // Live Tune-screen widget reads (Phase 7) aren't ported yet --
-            // save-file tuning alone can lag a just-changed setting until
-            // the Tune screen is backed out of, a known, accepted gap
-            // until that phase lands.
+            // Live Tune-screen read first: cars5.ccrs lags a just-changed
+            // setting until the Tune screen is backed out of.
             std::map<std::string, int> tuning;
-            if (local && !local->car.empty()) {
-                tuning = ReadTuningFromSave(local->car);
+            if (local) {
+                tuning = ReadTuningForRace(tableBase ? *tableBase : 0, local->car);
             } else {
-                DebugLog(L"tuning: skipped -- no local player identified, or local player's car "
-                         L"name is empty");
+                DebugLog(L"tuning: skipped -- no local player identified");
             }
 
             RaceResult race;

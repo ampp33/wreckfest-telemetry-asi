@@ -53,7 +53,7 @@ PostResult PostPayload(const ApiConfig& config, nlohmann::json payload, double t
 
     payload["api_key"] = config.api_key;
     std::string body = payload.dump();
-    std::wstring headers = L"Content-Type: application/json\r\napikey: " + Widen(config.supabase_anon_key) + L"\r\n";
+    std::wstring headers = L"Content-Type: application/json\r\nContent-Profile: wf1\r\napikey: " + Widen(config.supabase_anon_key) + L"\r\n";
 
     HttpResult res = HttpPost(Widen(config.supabase_url), headers, body, timeoutSeconds);
     if (!res.ok) return {false, true, "network error: request failed"};

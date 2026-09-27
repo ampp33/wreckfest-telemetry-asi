@@ -4,11 +4,13 @@
 // cars5_tuning_test (manual, needs a real file).
 #include <cstdio>
 #include <cstdlib>
+#include <map>
 #include <string>
 
 #include "lz4.h"
 #include "tuning/Lz4Block.h"
 #include "tuning/SaveFileTuning.h"
+#include "tuning/TuningMerge.h"
 
 namespace {
 
@@ -106,6 +108,33 @@ void TestMatchCars5CodenameExactOnly() {
     Check(!noMatch.has_value(), "MatchCars5Codename: no match for an unrelated prefix");
 }
 
+void TestFnv1aMatchesPython() {
+    // Reference values from wreckfest_telemetry.py's fnv1a().
+    using wreckfest_telemetry::Fnv1a;
+    Check(Fnv1a("") == 2166136261u, "Fnv1a: empty input is the offset basis");
+    Check(Fnv1a("TUNE_SLIDER_SUSPENSION_TRACK") == 452048435u, "Fnv1a: SUSPENSION slider");
+    Check(Fnv1a("TUNE_SLIDER_GEARING_TRACK") == 1300644595u, "Fnv1a: GEARING slider");
+    Check(Fnv1a("TUNE_SLIDER_BRAKES_TRACK") == 1089512086u, "Fnv1a: BRAKES slider");
+}
+
+void TestLiveTuningMerge() {
+    using wreckfest_telemetry::IsUninitializedLiveTuning;
+    using wreckfest_telemetry::MergeTuning;
+
+    std::map<std::string, int> allZero = {{"SUSPENSION", 0}, {"GEARING", 0}, {"DIFFERENTIAL", 0}, {"BRAKES", 0}};
+    Check(IsUninitializedLiveTuning(allZero), "IsUninitializedLiveTuning: all four zero");
+    Check(IsUninitializedLiveTuning({{"SUSPENSION", 0}, {"GEARING", 0}, {"BRAKES", 0}}),
+          "IsUninitializedLiveTuning: all resolved categories zero");
+    Check(!IsUninitializedLiveTuning({{"SUSPENSION", 0}, {"GEARING", 2}}),
+          "IsUninitializedLiveTuning: a real zero mixed with other values is kept");
+    Check(!IsUninitializedLiveTuning({}), "IsUninitializedLiveTuning: empty reading");
+
+    std::map<std::string, int> save = {{"SUSPENSION", 2}, {"GEARING", 4}, {"DIFFERENTIAL", 4}, {"BRAKES", 1}};
+    auto merged = MergeTuning(save, {{"SUSPENSION", 4}, {"BRAKES", 0}});
+    std::map<std::string, int> expected = {{"SUSPENSION", 4}, {"GEARING", 4}, {"DIFFERENTIAL", 4}, {"BRAKES", 0}};
+    Check(merged == expected, "MergeTuning: live wins per category, save fills the rest");
+}
+
 }  // namespace
 
 int main() {
@@ -115,6 +144,8 @@ int main() {
     TestExtractCars5DisplayNames();
     TestFindVehicleNameKey();
     TestMatchCars5CodenameExactOnly();
+    TestFnv1aMatchesPython();
+    TestLiveTuningMerge();
 
     if (g_failures == 0) {
         std::printf("all tests passed\n");
