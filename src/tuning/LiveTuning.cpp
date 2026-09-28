@@ -11,6 +11,7 @@
 #include "memory/SehGuard.h"
 #include "strings/HashRegistry.h"
 #include "tuning/SaveFileTuning.h"
+#include "tuning/TuningDisplay.h"
 #include "tuning/TuningMerge.h"
 
 namespace wreckfest_telemetry {
@@ -151,9 +152,11 @@ std::optional<int> ReadDifferential(std::optional<uintptr_t> anchor) {
     return TuneArrayValue(*g_tuneArrayCache, kDifferentialIdx);
 }
 
+// Debug-log rendering: 1-indexed (player-facing numbering), unlike the
+// 0-indexed values held in memory.
 std::wstring FormatTuning(const std::map<std::string, int>& tuning) {
     std::wstring out;
-    for (const auto& [category, index] : tuning) {
+    for (const auto& [category, index] : ToDisplayTuning(tuning)) {
         if (!out.empty()) out += L", ";
         out += WidenAscii(category) + L"=" + std::to_wstring(index);
     }

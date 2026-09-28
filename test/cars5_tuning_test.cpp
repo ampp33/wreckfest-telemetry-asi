@@ -9,6 +9,7 @@
 #include <iterator>
 
 #include "tuning/SaveFileTuning.h"
+#include "tuning/TuningDisplay.h"
 
 int main(int argc, char** argv) {
     if (argc != 3) {
@@ -55,8 +56,8 @@ int main(int argc, char** argv) {
     }
 
     auto tuning = wreckfest_telemetry::ResolveTuningIndices(*chunks, argv[2]);
-    std::printf("resolved tuning indices:\n");
-    for (auto& [label, idx] : tuning) {
+    std::printf("resolved tuning (1-indexed):\n");
+    for (auto& [label, idx] : wreckfest_telemetry::ToDisplayTuning(tuning)) {
         std::printf("  %s = %d\n", label.c_str(), idx);
     }
     return 0;

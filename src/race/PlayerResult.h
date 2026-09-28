@@ -35,7 +35,7 @@ struct RaceResult {
     std::string variation;
     std::string timestamp;
     std::vector<PlayerResult> players;
-    std::map<std::string, int> tuning;  // category -> 0-4 index
+    std::map<std::string, int> tuning;  // category -> 0-4 index (convert with ToDisplayTuning before output)
     int lap_count = 0;
     int opponent_count = 0;
     // Driving-assist difficulty settings in effect for this race -- see

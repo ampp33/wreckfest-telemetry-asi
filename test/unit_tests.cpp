@@ -10,6 +10,7 @@
 #include "lz4.h"
 #include "tuning/Lz4Block.h"
 #include "tuning/SaveFileTuning.h"
+#include "tuning/TuningDisplay.h"
 #include "tuning/TuningMerge.h"
 
 namespace {
@@ -133,6 +134,11 @@ void TestLiveTuningMerge() {
     auto merged = MergeTuning(save, {{"SUSPENSION", 4}, {"BRAKES", 0}});
     std::map<std::string, int> expected = {{"SUSPENSION", 4}, {"GEARING", 4}, {"DIFFERENTIAL", 4}, {"BRAKES", 0}};
     Check(merged == expected, "MergeTuning: live wins per category, save fills the rest");
+
+    std::map<std::string, int> display = wreckfest_telemetry::ToDisplayTuning(expected);
+    std::map<std::string, int> expectedDisplay = {{"SUSPENSION", 5}, {"GEARING", 5}, {"DIFFERENTIAL", 5}, {"BRAKES", 1}};
+    Check(display == expectedDisplay, "ToDisplayTuning: every value shifted 0-4 -> 1-5");
+    Check(expected["BRAKES"] == 0, "ToDisplayTuning: input left untouched");
 }
 
 }  // namespace

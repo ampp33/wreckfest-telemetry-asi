@@ -38,6 +38,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
         src/tuning/Cars5Path.cpp
         src/tuning/LiveTuning.cpp
         src/tuning/TuningMerge.cpp
+        src/tuning/TuningDisplay.cpp
         src/race/RaceFinality.cpp
         src/io/JsonlLog.cpp
         src/io/Config.cpp

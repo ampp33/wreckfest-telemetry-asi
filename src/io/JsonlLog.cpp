@@ -4,6 +4,8 @@
 #include <cstdio>
 #include <fstream>
 
+#include "tuning/TuningDisplay.h"
+
 namespace wreckfest_telemetry {
 
 namespace {
@@ -55,7 +57,7 @@ nlohmann::json RaceToDict(const RaceResult& race, bool opponentLaps) {
         {"track", race.track},
         {"variation", race.variation},
         {"timestamp", race.timestamp},
-        {"tuning", race.tuning},
+        {"tuning", ToDisplayTuning(race.tuning)},
         {"player", local ? PlayerToDict(*local) : nlohmann::json(nullptr)},
     };
     if (race.lap_count) d["lap_count"] = race.lap_count;
@@ -84,9 +86,10 @@ std::optional<nlohmann::json> BuildApiPayload(const RaceResult& race) {
         {"total_time_ms", local->total_time_ms},
     };
 
-    auto tuning1Indexed = [&race](const char* category) -> std::optional<int> {
-        auto it = race.tuning.find(category);
-        return it != race.tuning.end() ? std::optional<int>(it->second + 1) : std::nullopt;
+    const auto displayTuning = ToDisplayTuning(race.tuning);
+    auto tuning1Indexed = [&displayTuning](const char* category) -> std::optional<int> {
+        auto it = displayTuning.find(category);
+        return it != displayTuning.end() ? std::optional<int>(it->second) : std::nullopt;
     };
     if (auto v = tuning1Indexed("SUSPENSION")) payload["suspension"] = *v;
     if (auto v = tuning1Indexed("GEARING")) payload["gear_ratio"] = *v;

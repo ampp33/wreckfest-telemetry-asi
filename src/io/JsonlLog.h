@@ -23,7 +23,8 @@ nlohmann::json RaceToDict(const RaceResult& race, bool opponentLaps = false);
 bool AppendRaceLog(const RaceResult& race, const std::wstring& logPath, bool opponentLaps = false);
 
 // The API POST body. nullopt if no local player was identified (caller
-// skips posting). Tuning categories are 0-4 internally, sent 1-5; a
+// skips posting). Tuning categories are 0-4 internally, sent 1-5 (as are the values in
+// the JSONL log -- see ToDisplayTuning in tuning/TuningDisplay.h); a
 // category/lap_count/lap_times_ms with nothing to report is omitted
 // entirely, not sent as a null/empty placeholder. Driving-assist settings
 // (shifting/abs/traction_control/stability_control), when resolved, are
