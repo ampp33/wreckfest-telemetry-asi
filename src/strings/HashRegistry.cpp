@@ -1,7 +1,10 @@
 #include "strings/HashRegistry.h"
 
+#include <string_view>
+
 #include "memory/Offsets.h"
 #include "memory/ProcessMemory.h"
+#include "memory/SehGuard.h"
 
 namespace wreckfest_telemetry {
 
@@ -78,6 +81,39 @@ std::optional<uintptr_t> HashRegistryLookup(uintptr_t tableBase, const std::stri
         ++seen;
     }
     return std::nullopt;
+}
+
+std::vector<std::pair<std::string, uintptr_t>> RegistryEntriesMatching(uintptr_t tableBase, const std::string& prefix,
+                                                                       const std::string& suffix, size_t maxResults) {
+    // Names live inline in each fixed-size entry, from NAME_ARR_OFF - OBJ_ARR_OFF
+    // up to the next entry -- the most a name can span.
+    constexpr size_t kMaxNameLen = REGISTRY_STRIDE - (NAME_ARR_OFF - OBJ_ARR_OFF);
+
+    // Matching indices are collected in one guarded pass with raw reads --
+    // SehGuarded() has a single jump buffer, so no guarded reads nest in
+    // here -- then resolved below with the ordinary guarded readers.
+    std::vector<uint32_t> indices;
+    indices.reserve(maxResults);
+    SehGuarded([&] {
+        for (uint32_t idx = 0; idx < REGISTRY_CAPACITY && indices.size() < maxResults; ++idx) {
+            const char* name = reinterpret_cast<const char*>(tableBase + NAME_ARR_OFF + idx * REGISTRY_STRIDE);
+            if (name[0] != prefix[0] || std::string_view(name, prefix.size()) != prefix) continue;
+            size_t len = prefix.size();
+            while (len < kMaxNameLen && name[len] != '\0') ++len;
+            if (len >= suffix.size() && std::string_view(name + len - suffix.size(), suffix.size()) == suffix) {
+                indices.push_back(idx);
+            }
+        }
+        return 0;
+    });
+
+    std::vector<std::pair<std::string, uintptr_t>> result;
+    for (uint32_t idx : indices) {
+        auto name = ReadCString(tableBase + NAME_ARR_OFF + idx * REGISTRY_STRIDE, kMaxNameLen);
+        auto obj = ReadU64(tableBase + OBJ_ARR_OFF + idx * REGISTRY_STRIDE);
+        if (name && obj && *obj) result.emplace_back(*name, static_cast<uintptr_t>(*obj));
+    }
+    return result;
 }
 
 }  // namespace wreckfest_telemetry

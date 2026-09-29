@@ -13,6 +13,7 @@ set(PURE_LOGIC_SOURCES
     ${CMAKE_SOURCE_DIR}/src/tuning/Lz4Block.cpp
     ${CMAKE_SOURCE_DIR}/src/tuning/SaveFileTuning.cpp
     ${CMAKE_SOURCE_DIR}/src/tuning/TuningMerge.cpp
+    ${CMAKE_SOURCE_DIR}/src/tuning/AssemblyTuning.cpp
     ${CMAKE_SOURCE_DIR}/src/tuning/TuningDisplay.cpp
     ${DEPS_DIR}/lz4.c
 )

@@ -62,6 +62,10 @@ constexpr uint64_t BUCKET_ARR_OFF = 0x306020;    // table_base + this + bucket*8
 constexpr uint64_t NAME_ARR_OFF = 0x40605c;      // table_base + this + idx*STRIDE -> registered name cstr
 constexpr uint64_t OBJ_ARR_OFF = 0x406040;       // table_base + this + idx*STRIDE -> object ptr
 constexpr int REGISTRY_STRIDE = 0x138;
+// Entries scanned when listing the registry by name (it can't be walked by
+// hash without the full name). Matches the 0x20000-bucket hash; a live
+// session registers ~58k names, and the whole range is readable.
+constexpr uint32_t REGISTRY_CAPACITY = 0x20000;
 
 constexpr uint64_t EVENT_SETTINGS_TRACK_FIELD_OFF = 0xb0;       // -> "<track>_<variation>" cstr
 constexpr uint64_t EVENT_SETTINGS_BASE_TRACK_FIELD_OFF = 0xa0;  // -> "<track>" cstr (no variation)
@@ -94,23 +98,5 @@ constexpr uint64_t ASSIST_STABILITY_OFF = 0x0c;  // 0=off, 1=half, 2=full
 // screen.
 constexpr const char* CARSTATS_REGISTRY_NAME = "career-carstats-temp";
 constexpr uint64_t CARSTATS_WEIGHT_OFF = 0x64;
-
-// Tune-screen sliders resolve through the hash registry as
-// "menu/element/<fnv1a("TUNE_SLIDER_<CATEGORY>_TRACK")>"; the current value
-// is a normalized float (index / TUNE_MAX_INDEX) at +0x320 on that widget.
-// Widgets only hold real values once their tab has been visited.
-constexpr uint64_t TUNE_TRACK_VALUE_OFF = 0x320;
-constexpr int TUNE_MAX_INDEX = 4;
-
-// DIFFERENTIAL has no slider registry entry. All four categories' indices
-// instead live in one transient heap array of four 0x50-byte structs
-// (SUSPENSION, GEARING, DIFFERENTIAL, BRAKES): magic @+0x0, sequential id
-// @+0x4, 0-4 index @+0x18. Nothing points at it, so it is found by
-// structural signature near a resolved slider widget, and it is freed on
-// leaving the Tune screen.
-constexpr int32_t TUNE_ARR_MAGIC = 0x00090005;
-constexpr uint64_t TUNE_ARR_STRIDE = 0x50;
-constexpr uint64_t TUNE_ARR_ID_OFF = 0x4;
-constexpr uint64_t TUNE_ARR_VAL_OFF = 0x18;
 
 }  // namespace wreckfest_telemetry::offsets

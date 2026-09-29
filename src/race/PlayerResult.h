@@ -26,6 +26,10 @@ struct PlayerResult {
     int last_lap_ms = 0;
     int finish_position = 0;
     std::optional<int> slot_index;
+    // Tuning of the car this player raced, category -> 0-4 index (convert
+    // with ToDisplayTuning before output). Only the categories that
+    // resolved; empty if none did.
+    std::map<std::string, int> tuning;
 
     bool dnf() const { return (status_flags & offsets::STATUS_DNF_BIT) != 0; }
 };

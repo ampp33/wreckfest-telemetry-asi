@@ -23,6 +23,23 @@ std::string MsToStr(int ms) {
 
 }  // namespace
 
+std::optional<nlohmann::json> TuningToApiFields(const std::map<std::string, int>& tuning) {
+    static const std::pair<const char*, const char*> kFields[] = {
+        {"SUSPENSION", "suspension"},
+        {"GEARING", "gear_ratio"},
+        {"DIFFERENTIAL", "differential"},
+        {"BRAKES", "brake_balance"},
+    };
+    const auto display = ToDisplayTuning(tuning);
+    nlohmann::json fields = nlohmann::json::object();
+    for (const auto& [category, field] : kFields) {
+        auto it = display.find(category);
+        if (it != display.end()) fields[field] = it->second;
+    }
+    if (fields.empty()) return std::nullopt;
+    return fields;
+}
+
 nlohmann::json PlayerToDict(const PlayerResult& p, bool includeLaps) {
     nlohmann::json d = {
         {"position", p.position},
@@ -36,6 +53,7 @@ nlohmann::json PlayerToDict(const PlayerResult& p, bool includeLaps) {
         // so one higher than laps actually completed) -- corrected here.
         {"laps_completed", std::max(0, p.laps_completed - 1)},
     };
+    if (auto tuning = TuningToApiFields(p.tuning)) d["tuning"] = *tuning;
     if (includeLaps) {
         d["lap_times_ms"] = p.lap_times_ms;
         std::vector<std::string> laps;
@@ -86,15 +104,7 @@ std::optional<nlohmann::json> BuildApiPayload(const RaceResult& race) {
         {"total_time_ms", local->total_time_ms},
     };
 
-    const auto displayTuning = ToDisplayTuning(race.tuning);
-    auto tuning1Indexed = [&displayTuning](const char* category) -> std::optional<int> {
-        auto it = displayTuning.find(category);
-        return it != displayTuning.end() ? std::optional<int>(it->second) : std::nullopt;
-    };
-    if (auto v = tuning1Indexed("SUSPENSION")) payload["suspension"] = *v;
-    if (auto v = tuning1Indexed("GEARING")) payload["gear_ratio"] = *v;
-    if (auto v = tuning1Indexed("DIFFERENTIAL")) payload["differential"] = *v;
-    if (auto v = tuning1Indexed("BRAKES")) payload["brake_balance"] = *v;
+    if (auto tuning = TuningToApiFields(race.tuning)) payload.update(*tuning);
 
     if (race.lap_count) payload["lap_count"] = race.lap_count;
     if (!local->lap_times_ms.empty()) payload["lap_times_ms"] = local->lap_times_ms;

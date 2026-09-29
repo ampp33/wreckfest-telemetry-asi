@@ -24,7 +24,7 @@
 #include "strings/HashRegistry.h"
 #include "strings/TrackDetection.h"
 #include "strings/VehicleWeight.h"
-#include "tuning/LiveTuning.h"
+#include "tuning/RaceCarTuning.h"
 
 namespace wreckfest_telemetry {
 
@@ -84,7 +84,6 @@ struct WorkerLoopState {
     // occasionally mislabeling a real other racer as local.
     std::optional<std::string> confirmedLocalName;
     LapSplitTracker lapSplits;
-    LiveTuningTracker liveTuning;
     int flushBackoffIdx = 0;
     std::chrono::steady_clock::time_point nextFlushAt;
     int queuePending = 0;
@@ -164,7 +163,6 @@ void AttemptQueueFlush(const PollContext& ctx, WorkerLoopState& state) {
 void RunOneTick(const PollContext& ctx, WorkerLoopState& state) {
     int stillRacing = 0;
     auto tableBase = GetTableBase(ctx.base);
-    if (tableBase) PollLiveTuning(*tableBase, state.liveTuning);
 
     ScrapeResult scrape = state.scanNeeded
                               ? ScrapePlayers(ctx.base, tableBase, std::nullopt, state.lapSplits, stillRacing)
@@ -236,16 +234,20 @@ void RunOneTick(const PollContext& ctx, WorkerLoopState& state) {
                 DebugLog((L"vehicle weight: " + std::to_wstring(vehicleWeightKg) + L" kg").c_str());
             }
 
-            // Save file, plus any slider changes seen for this car that
-            // cars5.ccrs doesn't hold yet (it lags until the Tune screen is
-            // backed out of).
+            // Every car's tuning from its own race assembly. The local
+            // player's falls back to cars5.ccrs per category (it lags
+            // behind a tune set after Restart or before backing out of the
+            // Tune screen).
+            auto raceCars = ReadRaceCars(tableBase.value_or(0));
+            AssignOpponentTunings(players, raceCars);
             std::map<std::string, int> tuning;
             if (local) {
                 auto carKey = tableBase ? LocalPlayerCarKey(*tableBase, true) : std::nullopt;
                 DebugLog((L"tuning: reading for race -- local player's car '" + WidenAscii(local->car) +
                           L"', selected car key '" + (carKey ? WidenAscii(*carKey) : L"(unresolved)") + L"'")
                              .c_str());
-                tuning = ReadTuningForRace(local->car, carKey, state.liveTuning);
+                tuning = ReadTuningForRace(raceCars, local->car, carKey, local->slot_index);
+                FindLocalPlayer(players)->tuning = tuning;
             } else {
                 DebugLog(L"tuning: skipped -- no local player identified");
             }
