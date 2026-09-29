@@ -16,6 +16,10 @@ namespace wreckfest_telemetry {
 // modified match if several are found. nullopt if none resolve.
 std::optional<std::wstring> FindCars5Path();
 
+// `path`'s last-modified time as local "YYYY-MM-DD HH:MM:SS", or
+// "(unknown)" -- debug-log only.
+std::wstring FileModifiedTime(const std::wstring& path);
+
 // Parses the 20-byte header + chained-LZ4 chunk structure. nullopt if the
 // header doesn't look like a cars5.ccrs file, or if any chunk fails to
 // decompress (a bounds mismatch on the mini-header is not an error --

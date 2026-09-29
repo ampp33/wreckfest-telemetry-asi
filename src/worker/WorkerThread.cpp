@@ -33,6 +33,10 @@ namespace {
 constexpr double kFlushBackoffSeconds[] = {60.0, 120.0, 300.0, 900.0};
 constexpr double kPollIntervalSeconds = 0.5;
 
+// Diagnostic builds only: log to debug_log.txt without needing debug.txt.
+// Keep false for releases.
+constexpr bool kAlwaysDebugLog = false;
+
 // Remote source for {supabase_url, supabase_anon_key} -- see Config.h.
 // wfracelog.com is GitHub Pages, which enforces HTTPS (a plain http://
 // request 301s here) -- go straight to https:// rather than relying on
@@ -80,6 +84,7 @@ struct WorkerLoopState {
     // occasionally mislabeling a real other racer as local.
     std::optional<std::string> confirmedLocalName;
     LapSplitTracker lapSplits;
+    LiveTuningTracker liveTuning;
     int flushBackoffIdx = 0;
     std::chrono::steady_clock::time_point nextFlushAt;
     int queuePending = 0;
@@ -100,6 +105,19 @@ void EmitRace(const RaceResult& race, const std::wstring& logPath, const ApiConf
         DebugLog(L"API post skipped: no local player identified");
         return;
     }
+    // Tuning fields here are already 1-indexed. Logged before PostPayload()
+    // adds api_key, so the key never reaches the log.
+    std::string tuningFields;
+    for (const char* field : {"suspension", "gear_ratio", "differential", "brake_balance"}) {
+        if (!tuningFields.empty()) tuningFields += ", ";
+        tuningFields += std::string(field) + "=" + (payload->contains(field) ? (*payload)[field].dump() : "(missing)");
+    }
+    DebugLog((L"API payload: vehicle='" + WidenAscii(payload->value("vehicle", "")) + L"' " +
+              WidenAscii(tuningFields))
+                 .c_str());
+    // ensure_ascii: player names can be UTF-8, which the wide log stream
+    // can fail to convert (and then stop writing altogether).
+    DebugLog((L"API payload (full): " + WidenAscii(payload->dump(-1, ' ', true))).c_str());
     if (!ApiConfigComplete(apiConfig)) {
         // Config incomplete (api-key.txt missing and/or remote
         // config.default.json unreachable this run) -- queue rather than
@@ -146,6 +164,7 @@ void AttemptQueueFlush(const PollContext& ctx, WorkerLoopState& state) {
 void RunOneTick(const PollContext& ctx, WorkerLoopState& state) {
     int stillRacing = 0;
     auto tableBase = GetTableBase(ctx.base);
+    if (tableBase) PollLiveTuning(*tableBase, state.liveTuning);
 
     ScrapeResult scrape = state.scanNeeded
                               ? ScrapePlayers(ctx.base, tableBase, std::nullopt, state.lapSplits, stillRacing)
@@ -217,11 +236,16 @@ void RunOneTick(const PollContext& ctx, WorkerLoopState& state) {
                 DebugLog((L"vehicle weight: " + std::to_wstring(vehicleWeightKg) + L" kg").c_str());
             }
 
-            // Live Tune-screen read first: cars5.ccrs lags a just-changed
-            // setting until the Tune screen is backed out of.
+            // Save file, plus any slider changes seen for this car that
+            // cars5.ccrs doesn't hold yet (it lags until the Tune screen is
+            // backed out of).
             std::map<std::string, int> tuning;
             if (local) {
-                tuning = ReadTuningForRace(tableBase ? *tableBase : 0, local->car);
+                auto carKey = tableBase ? LocalPlayerCarKey(*tableBase, true) : std::nullopt;
+                DebugLog((L"tuning: reading for race -- local player's car '" + WidenAscii(local->car) +
+                          L"', selected car key '" + (carKey ? WidenAscii(*carKey) : L"(unresolved)") + L"'")
+                             .c_str());
+                tuning = ReadTuningForRace(local->car, carKey, state.liveTuning);
             } else {
                 DebugLog(L"tuning: skipped -- no local player identified");
             }
@@ -277,10 +301,15 @@ void RunPollLoop(HMODULE hModule) {
     // (same directory as the files above) turns on verbose logging to
     // debug_log.txt for this session -- see README's troubleshooting
     // section. DebugLog() calls everywhere else stay no-ops otherwise.
+    // kAlwaysDebugLog skips the marker check, for diagnostic builds handed
+    // to a player investigating a problem.
     std::wstring debugMarker = PluginFilePath(hModule, L"debug.txt");
-    if (!debugMarker.empty() && GetFileAttributesW(debugMarker.c_str()) != INVALID_FILE_ATTRIBUTES) {
+    bool markerFound = !debugMarker.empty() && GetFileAttributesW(debugMarker.c_str()) != INVALID_FILE_ATTRIBUTES;
+    if (kAlwaysDebugLog || markerFound) {
         InitDebugLog(PluginFilePath(hModule, L"debug_log.txt"));
-        DebugLog(L"debug logging enabled (debug.txt marker found)");
+        DebugLog(markerFound ? L"debug logging enabled (debug.txt marker found)"
+                             : L"debug logging enabled (always on in this build)");
+        DebugLog((L"plugin build: " + WidenAscii(__DATE__ " " __TIME__)).c_str());
     }
 
     ctx.apiConfig.api_key = LoadApiKey(PluginFilePath(hModule, L"api-key.txt"));

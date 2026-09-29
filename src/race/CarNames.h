@@ -10,6 +10,12 @@
 
 namespace wreckfest_telemetry {
 
+// Raw "VEHICLE_NAME_<id>_<variant>" key of the car currently selected in
+// the garage, via the career-save/garage chain -- memory reads only, no
+// save-file lookup, so it's cheap enough to call every poll. `verbose`
+// logs which step failed; leave it off when polling.
+std::optional<std::string> LocalPlayerCarKey(uintptr_t tableBase, bool verbose = false);
+
 // The local player's own car: resolves a live "VEHICLE_NAME_<id>_<variant>"
 // key via the career-save/garage chain, then looks that exact key up in
 // cars5.ccrs for its display name (byte-exact, e.g. "RoadSlayer"). Call once

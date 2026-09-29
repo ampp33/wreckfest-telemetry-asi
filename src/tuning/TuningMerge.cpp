@@ -1,7 +1,5 @@
 #include "tuning/TuningMerge.h"
 
-#include <algorithm>
-
 namespace wreckfest_telemetry {
 
 uint32_t Fnv1a(std::string_view data) {
@@ -12,8 +10,25 @@ uint32_t Fnv1a(std::string_view data) {
     return h;
 }
 
-bool IsUninitializedLiveTuning(const std::map<std::string, int>& live) {
-    return !live.empty() && std::all_of(live.begin(), live.end(), [](const auto& kv) { return kv.second == 0; });
+void LiveTuningTracker::Observe(const std::string& carKey, const std::map<std::string, int>& live) {
+    if (carKey != car_) {
+        car_ = carKey;
+        changes_.clear();
+    }
+    // lastSeen_ deliberately survives a car switch: a slider still holding
+    // the previous car's value must not count as a change for the new one.
+    for (const auto& [category, index] : live) {
+        auto it = lastSeen_.find(category);
+        if (it != lastSeen_.end() && it->second != index) {
+            changes_[category] = index;
+        }
+        lastSeen_[category] = index;
+    }
+}
+
+std::map<std::string, int> LiveTuningTracker::ChangesFor(const std::string& carKey) const {
+    if (carKey.empty() || carKey != car_) return {};
+    return changes_;
 }
 
 std::map<std::string, int> MergeTuning(const std::map<std::string, int>& save,

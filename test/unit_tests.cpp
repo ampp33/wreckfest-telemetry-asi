@@ -118,22 +118,58 @@ void TestFnv1aMatchesPython() {
     Check(Fnv1a("TUNE_SLIDER_BRAKES_TRACK") == 1089512086u, "Fnv1a: BRAKES slider");
 }
 
-void TestLiveTuningMerge() {
-    using wreckfest_telemetry::IsUninitializedLiveTuning;
-    using wreckfest_telemetry::MergeTuning;
+void TestLiveTuningTracker() {
+    using wreckfest_telemetry::LiveTuningTracker;
+    using Tuning = std::map<std::string, int>;
 
-    std::map<std::string, int> allZero = {{"SUSPENSION", 0}, {"GEARING", 0}, {"DIFFERENTIAL", 0}, {"BRAKES", 0}};
-    Check(IsUninitializedLiveTuning(allZero), "IsUninitializedLiveTuning: all four zero");
-    Check(IsUninitializedLiveTuning({{"SUSPENSION", 0}, {"GEARING", 0}, {"BRAKES", 0}}),
-          "IsUninitializedLiveTuning: all resolved categories zero");
-    Check(!IsUninitializedLiveTuning({{"SUSPENSION", 0}, {"GEARING", 2}}),
-          "IsUninitializedLiveTuning: a real zero mixed with other values is kept");
-    Check(!IsUninitializedLiveTuning({}), "IsUninitializedLiveTuning: empty reading");
+    // Fresh session: uninitialised widgets read all zeros. The first
+    // reading is a baseline, so nothing is attributed to the car.
+    LiveTuningTracker t;
+    t.Observe("CAR_A", {{"SUSPENSION", 0}, {"GEARING", 0}, {"BRAKES", 0}});
+    Check(t.ChangesFor("CAR_A").empty(), "LiveTuningTracker: first reading is a baseline, not a change");
+
+    // Tune screen opened for car A: shown tabs refresh, the player moves one.
+    t.Observe("CAR_A", {{"SUSPENSION", 2}, {"GEARING", 0}, {"BRAKES", 1}});
+    t.Observe("CAR_A", {{"SUSPENSION", 2}, {"GEARING", 0}, {"BRAKES", 1}, {"DIFFERENTIAL", 4}});
+    t.Observe("CAR_A", {{"SUSPENSION", 3}, {"GEARING", 0}, {"BRAKES", 1}, {"DIFFERENTIAL", 4}});
+    Check(t.ChangesFor("CAR_A") == Tuning{{"SUSPENSION", 3}, {"BRAKES", 1}},
+          "LiveTuningTracker: only sliders that changed are attributed; unchanged GEARING and first-seen "
+          "DIFFERENTIAL aren't");
+    Check(t.ChangesFor("CAR_B").empty(), "LiveTuningTracker: changes are only reported for their own car");
+
+    // Replays the live repro (2026-09-28): switch to car B without opening
+    // its Tune screen. The sliders still hold car A's values, which must
+    // not be attributed to B.
+    t.Observe("CAR_B", {{"SUSPENSION", 3}, {"GEARING", 0}, {"BRAKES", 1}});
+    Check(t.ChangesFor("CAR_B").empty(), "LiveTuningTracker: previous car's slider values aren't carried over");
+    Check(t.ChangesFor("CAR_A").empty(), "LiveTuningTracker: switching cars drops the old car's changes");
+
+    // Car B's Tune screen opened, only the Suspension tab shown: that one
+    // refreshes to B's real value; GEARING still holds A's and stays ignored.
+    t.Observe("CAR_B", {{"SUSPENSION", 4}, {"GEARING", 0}, {"BRAKES", 1}});
+    Check(t.ChangesFor("CAR_B") == Tuning{{"SUSPENSION", 4}},
+          "LiveTuningTracker: a tab shown for this car counts, an unshown one doesn't");
+
+    // A slider moved away and back still ends on the latest value.
+    t.Observe("CAR_B", {{"SUSPENSION", 1}, {"GEARING", 0}, {"BRAKES", 1}});
+    t.Observe("CAR_B", {{"SUSPENSION", 4}, {"GEARING", 0}, {"BRAKES", 1}});
+    Check(t.ChangesFor("CAR_B") == Tuning{{"SUSPENSION", 4}}, "LiveTuningTracker: latest value wins");
+
+    // A category missing from a reading (tune array freed on leaving the
+    // screen) is neither a change nor forgotten.
+    t.Observe("CAR_B", {{"SUSPENSION", 4}});
+    Check(t.ChangesFor("CAR_B") == Tuning{{"SUSPENSION", 4}},
+          "LiveTuningTracker: a category missing from a reading keeps its recorded change");
+    Check(t.ChangesFor("").empty(), "LiveTuningTracker: an empty car key never matches");
+}
+
+void TestLiveTuningMerge() {
+    using wreckfest_telemetry::MergeTuning;
 
     std::map<std::string, int> save = {{"SUSPENSION", 2}, {"GEARING", 4}, {"DIFFERENTIAL", 4}, {"BRAKES", 1}};
     auto merged = MergeTuning(save, {{"SUSPENSION", 4}, {"BRAKES", 0}});
     std::map<std::string, int> expected = {{"SUSPENSION", 4}, {"GEARING", 4}, {"DIFFERENTIAL", 4}, {"BRAKES", 0}};
-    Check(merged == expected, "MergeTuning: live wins per category, save fills the rest");
+    Check(merged == expected, "MergeTuning: live changes win per category, save fills the rest");
 
     std::map<std::string, int> display = wreckfest_telemetry::ToDisplayTuning(expected);
     std::map<std::string, int> expectedDisplay = {{"SUSPENSION", 5}, {"GEARING", 5}, {"DIFFERENTIAL", 5}, {"BRAKES", 1}};
@@ -151,6 +187,7 @@ int main() {
     TestFindVehicleNameKey();
     TestMatchCars5CodenameExactOnly();
     TestFnv1aMatchesPython();
+    TestLiveTuningTracker();
     TestLiveTuningMerge();
 
     if (g_failures == 0) {

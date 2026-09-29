@@ -2,7 +2,10 @@
 
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <string>
+
+#include "tuning/TuningMerge.h"
 
 namespace wreckfest_telemetry {
 
@@ -13,10 +16,18 @@ namespace wreckfest_telemetry {
 // only rewritten when the player backs out of the Tune screen.
 std::map<std::string, int> ReadLiveTuning(uintptr_t tableBase);
 
-// Tuning to attach to a just-finished race: the live reading, falling back
-// per category to the save file (keyed by the race's own car) for anything
-// live doesn't have. An all-zero live reading is treated as uninitialised
-// widgets and discarded -- see IsUninitializedLiveTuning().
-std::map<std::string, int> ReadTuningForRace(uintptr_t tableBase, const std::string& carName);
+// One poll: reads the live sliders and feeds them to `tracker` under the
+// currently selected car's key. Call every tick, so slider changes are
+// seen while they happen -- see LiveTuningTracker for why a single read at
+// race end can't be trusted.
+void PollLiveTuning(uintptr_t tableBase, LiveTuningTracker& tracker);
+
+// Tuning to attach to a just-finished race: the save file (keyed by the
+// race's own car), overlaid with any slider changes `tracker` saw while
+// that car (`carKey`) was selected. Those cover a change made on the Tune
+// screen that cars5.ccrs doesn't hold yet, because it's only rewritten on
+// backing out.
+std::map<std::string, int> ReadTuningForRace(const std::string& carName, const std::optional<std::string>& carKey,
+                                             const LiveTuningTracker& tracker);
 
 }  // namespace wreckfest_telemetry

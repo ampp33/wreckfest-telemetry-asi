@@ -2,6 +2,7 @@
 
 #include <windows.h>
 
+#include <chrono>
 #include <cmath>
 #include <optional>
 
@@ -9,6 +10,7 @@
 #include "memory/Offsets.h"
 #include "memory/ProcessMemory.h"
 #include "memory/SehGuard.h"
+#include "race/CarNames.h"
 #include "strings/HashRegistry.h"
 #include "tuning/SaveFileTuning.h"
 #include "tuning/TuningDisplay.h"
@@ -26,6 +28,12 @@ constexpr size_t kDifferentialIdx = 2;  // position of "DIFFERENTIAL" in kTuneCa
 // re-read every call, and the whole signature is re-checked first since the
 // array is freed whenever the Tune screen is left.
 std::optional<uintptr_t> g_tuneArrayCache;
+
+// The array only exists while the Tune screen is open, and this is polled
+// every tick, so a miss is the normal case outside that screen. Rescanning
+// is throttled rather than repeated on every poll.
+constexpr auto kTuneArrayRescanInterval = std::chrono::seconds(2);
+std::optional<std::chrono::steady_clock::time_point> g_lastTuneArrayScan;
 
 std::optional<uintptr_t> SliderTrackPtr(uintptr_t tableBase, const char* category) {
     std::string widget = std::string("TUNE_SLIDER_") + category + "_TRACK";
@@ -122,10 +130,7 @@ uintptr_t Distance(uintptr_t a, uintptr_t b) { return a > b ? a - b : b - a; }
 // happens to share the signature. Nearest match to the anchor wins.
 std::optional<uintptr_t> FindTuneArray(uintptr_t anchor) {
     auto span = ContiguousWritableSpan(anchor);
-    if (!span) {
-        DebugLog(L"tune array: anchor widget isn't in committed writable memory");
-        return std::nullopt;
-    }
+    if (!span) return std::nullopt;
     uintptr_t end = span->base + span->size;
     std::optional<uintptr_t> best;
     size_t matches = 0;
@@ -134,9 +139,12 @@ std::optional<uintptr_t> FindTuneArray(uintptr_t anchor) {
         ++matches;
         if (!best || Distance(p, anchor) < Distance(*best, anchor)) best = p;
     }
-    DebugLog((L"tune array: scanned " + std::to_wstring(span->size / (1024 * 1024)) + L" MiB around anchor, " +
-              std::to_wstring(matches) + L" match(es)")
-                 .c_str());
+    // Only hits are logged -- misses are routine outside the Tune screen.
+    if (best) {
+        DebugLog((L"tune array: found after scanning " + std::to_wstring(span->size / (1024 * 1024)) +
+                  L" MiB around anchor, " + std::to_wstring(matches) + L" match(es)")
+                     .c_str());
+    }
     return best;
 }
 
@@ -146,6 +154,9 @@ std::optional<int> ReadDifferential(std::optional<uintptr_t> anchor) {
     }
     if (!g_tuneArrayCache) {
         if (!anchor) return std::nullopt;
+        auto now = std::chrono::steady_clock::now();
+        if (g_lastTuneArrayScan && now - *g_lastTuneArrayScan < kTuneArrayRescanInterval) return std::nullopt;
+        g_lastTuneArrayScan = now;
         g_tuneArrayCache = FindTuneArray(*anchor);
         if (!g_tuneArrayCache) return std::nullopt;
     }
@@ -162,6 +173,11 @@ std::wstring FormatTuning(const std::map<std::string, int>& tuning) {
     }
     return out.empty() ? L"(none)" : out;
 }
+
+// Last raw reading/car logged by PollLiveTuning(), so only changes are
+// logged rather than every 0.5s poll.
+std::optional<std::string> g_lastLoggedCarKey;
+std::map<std::string, int> g_lastLoggedLive;
 
 }  // namespace
 
@@ -185,25 +201,71 @@ std::map<std::string, int> ReadLiveTuning(uintptr_t tableBase) {
     return result;
 }
 
-std::map<std::string, int> ReadTuningForRace(uintptr_t tableBase, const std::string& carName) {
+void PollLiveTuning(uintptr_t tableBase, LiveTuningTracker& tracker) {
+    if (tableBase == 0) return;
+    auto carKey = LocalPlayerCarKey(tableBase);
+    if (!carKey) return;
+    if (g_lastLoggedCarKey != *carKey) {
+        DebugLog((L"tuning: selected car is now '" + WidenAscii(*carKey) + L"'" +
+                  (g_lastLoggedCarKey ? L" (was '" + WidenAscii(*g_lastLoggedCarKey) + L"')" : L""))
+                     .c_str());
+        g_lastLoggedCarKey = *carKey;
+    }
     auto live = ReadLiveTuning(tableBase);
-    DebugLog((L"tuning: live read " + FormatTuning(live)).c_str());
-    if (IsUninitializedLiveTuning(live)) {
-        DebugLog(L"tuning: live read is all zeros (Tune screen likely never opened) -- deferring to save file");
-        live.clear();
+    if (live != g_lastLoggedLive) {
+        // Raw widget state, not yet attributed to any car -- see
+        // LiveTuningTracker for which of these actually count.
+        DebugLog((L"tuning: live sliders read " + FormatTuning(live) + L" (selected car '" + WidenAscii(*carKey) +
+                  L"')")
+                     .c_str());
+        g_lastLoggedLive = live;
     }
-    if (live.size() == kTuneCategories.size()) {
-        return live;
+    auto before = tracker.ChangesFor(*carKey);
+    tracker.Observe(*carKey, live);
+    auto after = tracker.ChangesFor(*carKey);
+    if (after != before) {
+        DebugLog((L"tuning: live changes for '" + WidenAscii(*carKey) + L"' now " + FormatTuning(after)).c_str());
     }
+}
 
+std::map<std::string, int> ReadTuningForRace(const std::string& carName, const std::optional<std::string>& carKey,
+                                             const LiveTuningTracker& tracker) {
     std::map<std::string, int> save;
     if (!carName.empty()) {
         save = ReadTuningFromSave(carName);
     } else {
-        DebugLog(L"tuning: local player's car name is empty -- save-file fallback skipped");
+        DebugLog(L"tuning: local player's car name is empty -- save-file read skipped");
     }
-    auto merged = MergeTuning(save, live);
+    DebugLog((L"tuning: save file " + FormatTuning(save)).c_str());
+    // Cross-check: the save file is read by display name above, but the
+    // selected car's key identifies its codename directly. A mismatch means
+    // the save-file values came from a different car.
+    if (carKey) {
+        if (auto entry = FindVehicleNameKeyInSave(*carKey)) {
+            DebugLog((L"tuning: selected car key '" + WidenAscii(*carKey) + L"' is '" +
+                      WidenAscii(entry->display_name) + L"' (codename '" + WidenAscii(entry->codename) +
+                      L"') in cars5.ccrs" +
+                      (entry->display_name == carName ? L"" : L" -- WARNING: differs from the race's car name"))
+                         .c_str());
+        }
+    }
+
+    std::map<std::string, int> changes;
+    if (carKey) {
+        changes = tracker.ChangesFor(*carKey);
+    } else {
+        DebugLog(L"tuning: selected car's key unresolved -- live changes ignored");
+    }
+    DebugLog((L"tuning: live changes for this car " + FormatTuning(changes)).c_str());
+
+    auto merged = MergeTuning(save, changes);
     DebugLog((L"tuning: merged " + FormatTuning(merged)).c_str());
+    for (const char* category : kTuneCategories) {
+        std::wstring source = changes.count(category) ? L"live slider change"
+                              : save.count(category)  ? L"save file"
+                                                      : L"MISSING (not posted)";
+        DebugLog((L"tuning:   " + WidenAscii(category) + L" from " + source).c_str());
+    }
     return merged;
 }
 

@@ -9,6 +9,7 @@
 namespace wreckfest_telemetry {
 
 std::optional<std::wstring> FindCars5Path() { return std::nullopt; }
+std::wstring FileModifiedTime(const std::wstring&) { return L"(unknown)"; }
 
 void InitDebugLog(const std::wstring&) {}
 void DebugLog(const wchar_t*) {}

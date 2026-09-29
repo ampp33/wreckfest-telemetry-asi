@@ -17,6 +17,18 @@ namespace wreckfest_telemetry {
 
 namespace {
 
+// Local time, "YYYY-MM-DD HH:MM:SS" -- for comparing a save file's age
+// against the race timestamps in the same debug log.
+std::wstring FormatFileTime(const FILETIME& ft) {
+    FILETIME local;
+    SYSTEMTIME st;
+    if (!FileTimeToLocalFileTime(&ft, &local) || !FileTimeToSystemTime(&local, &st)) return L"(unknown)";
+    wchar_t buf[32];
+    swprintf(buf, 32, L"%04u-%02u-%02u %02u:%02u:%02u", st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute,
+             st.wSecond);
+    return buf;
+}
+
 void ExpandGlob(const std::wstring& base, const std::vector<std::wstring>& segments, size_t idx,
                  std::vector<std::wstring>& results) {
     if (idx == segments.size()) {
@@ -208,14 +220,30 @@ std::optional<std::wstring> FindCars5Path() {
     FILETIME bestTime{};
     for (const auto& c : candidates) {
         WIN32_FILE_ATTRIBUTE_DATA data;
-        if (!GetFileAttributesExW(c.c_str(), GetFileExInfoStandard, &data)) continue;
+        if (!GetFileAttributesExW(c.c_str(), GetFileExInfoStandard, &data)) {
+            DebugLog((L"cars5.ccrs: candidate '" + c + L"' (unreadable attributes, skipped)").c_str());
+            continue;
+        }
+        DebugLog((L"cars5.ccrs: candidate '" + c + L"' modified " + FormatFileTime(data.ftLastWriteTime)).c_str());
         if (best.empty() || CompareFileTime(&data.ftLastWriteTime, &bestTime) > 0) {
             best = c;
             bestTime = data.ftLastWriteTime;
         }
     }
     cache = best.empty() ? std::nullopt : std::optional<std::wstring>(best);
+    if (candidates.size() > 1 && cache) {
+        DebugLog((L"cars5.ccrs: " + std::to_wstring(candidates.size()) +
+                  L" candidates -- picked the most recently modified, '" + *cache +
+                  L"' (cached for the rest of this session)")
+                     .c_str());
+    }
     return cache;
+}
+
+std::wstring FileModifiedTime(const std::wstring& path) {
+    WIN32_FILE_ATTRIBUTE_DATA data;
+    if (!GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &data)) return L"(unknown)";
+    return FormatFileTime(data.ftLastWriteTime);
 }
 
 }  // namespace wreckfest_telemetry

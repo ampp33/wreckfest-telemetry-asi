@@ -244,6 +244,15 @@ std::map<std::string, int> ResolveTuningIndices(const std::vector<std::string>& 
                      .c_str());
         return result;
     }
+    // MatchCars5Codename() takes the first match, so a display name shared
+    // by several codenames would silently read the wrong car's tuning.
+    std::wstring sameName;
+    for (const auto& [otherCodename, name] : displayNames) {
+        if (name == carName && otherCodename != *codename) sameName += L" '" + WidenAscii(otherCodename) + L"'";
+    }
+    DebugLog((L"tuning: display name '" + WidenAscii(carName) + L"' -> codename '" + WidenAscii(*codename) + L"'" +
+              (sameName.empty() ? L"" : L" -- WARNING: also shared by" + sameName + L", which were ignored"))
+                 .c_str());
     auto carIt = cars.find(*codename);
     if (carIt == cars.end()) {
         DebugLog((L"tuning: matched codename '" + WidenAscii(*codename) +
@@ -265,10 +274,22 @@ std::map<std::string, int> ResolveTuningIndices(const std::vector<std::string>& 
     };
     for (const auto& entry : kPresetTable) {
         auto partIt = carIt->second.find(entry.key);
-        if (partIt == carIt->second.end()) continue;
+        if (partIt == carIt->second.end()) {
+            DebugLog((L"tuning: save file " + WidenAscii(entry.label) + L" -- no '" + WidenAscii(entry.key) +
+                      L"' part recorded for this car")
+                         .c_str());
+            continue;
+        }
         auto presetIt = std::find(entry.presets.begin(), entry.presets.end(), partIt->second);
         if (presetIt != entry.presets.end()) {
             result[entry.label] = static_cast<int>(std::distance(entry.presets.begin(), presetIt));
+            DebugLog((L"tuning: save file " + WidenAscii(entry.label) + L" = " +
+                      std::to_wstring(result[entry.label] + 1) + L" (preset '" + WidenAscii(partIt->second) + L"')")
+                         .c_str());
+        } else {
+            DebugLog((L"tuning: save file " + WidenAscii(entry.label) + L" -- unrecognised preset '" +
+                      WidenAscii(partIt->second) + L"', omitted")
+                         .c_str());
         }
     }
     return result;
@@ -284,7 +305,7 @@ std::optional<std::vector<std::string>> LoadCars5Chunks() {
         DebugLog(L"cars5.ccrs: path not found (Steam userdata glob missed)");
         return std::nullopt;
     }
-    DebugLog((L"cars5.ccrs: using file at '" + *path + L"'").c_str());
+    DebugLog((L"cars5.ccrs: using file at '" + *path + L"' (last modified " + FileModifiedTime(*path) + L")").c_str());
 
     std::ifstream in(NarrowPath(*path), std::ios::binary);
     if (!in) {

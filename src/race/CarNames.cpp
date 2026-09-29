@@ -162,53 +162,61 @@ std::optional<uintptr_t> GetCarNameTable(uintptr_t moduleBase, std::optional<int
 
 }  // namespace
 
-std::optional<std::string> LocalPlayerCarName(uintptr_t tableBase) {
+std::optional<std::string> LocalPlayerCarKey(uintptr_t tableBase, bool verbose) {
     auto careerObj = HashRegistryLookup(tableBase, "save/career.cres");
     if (!careerObj) {
-        DebugLog(L"car-name: hash-registry lookup for 'save/career.cres' failed");
+        if (verbose) DebugLog(L"car-name: hash-registry lookup for 'save/career.cres' failed");
         return std::nullopt;
     }
 
     auto garageIdxOpt = ReadI32(*careerObj + 0x1c);
     auto vehicleIdOpt = ReadI32(*careerObj + 0x180);
     if (!garageIdxOpt || !vehicleIdOpt || *vehicleIdOpt < 0) {
-        DebugLog((L"car-name: garage_idx/vehicle_id read failed, or vehicle_id < 0 (garage_idx=" +
-                  (garageIdxOpt ? std::to_wstring(*garageIdxOpt) : L"<read failed>") +
-                  L", vehicle_id=" + (vehicleIdOpt ? std::to_wstring(*vehicleIdOpt) : L"<read failed>") + L")")
-                     .c_str());
+        if (verbose) {
+            DebugLog((L"car-name: garage_idx/vehicle_id read failed, or vehicle_id < 0 (garage_idx=" +
+                      (garageIdxOpt ? std::to_wstring(*garageIdxOpt) : L"<read failed>") +
+                      L", vehicle_id=" + (vehicleIdOpt ? std::to_wstring(*vehicleIdOpt) : L"<read failed>") + L")")
+                         .c_str());
+        }
         return std::nullopt;
     }
 
     auto garageObjOpt = ReadU64(tableBase + OBJ_ARR_OFF + static_cast<uintptr_t>(*garageIdxOpt) * REGISTRY_STRIDE);
     if (!garageObjOpt || !*garageObjOpt) {
-        DebugLog(L"car-name: garage object read failed (career_obj+0x1c index into registry)");
+        if (verbose) DebugLog(L"car-name: garage object read failed (career_obj+0x1c index into registry)");
         return std::nullopt;
     }
 
     auto vehiclesBaseOpt = ReadU64(*garageObjOpt);
     if (!vehiclesBaseOpt || !*vehiclesBaseOpt) {
-        DebugLog(L"car-name: vehicles-base pointer read failed (garage_obj+0)");
+        if (verbose) DebugLog(L"car-name: vehicles-base pointer read failed (garage_obj+0)");
         return std::nullopt;
     }
 
     uintptr_t carDef = static_cast<uintptr_t>(*vehiclesBaseOpt) + static_cast<uintptr_t>(*vehicleIdOpt) * 0x90;
     auto viewObjOpt = ReadU64(carDef);
     if (!viewObjOpt || !*viewObjOpt) {
-        DebugLog(L"car-name: view object read failed (vehicles_base + vehicle_id*0x90)");
+        if (verbose) DebugLog(L"car-name: view object read failed (vehicles_base + vehicle_id*0x90)");
         return std::nullopt;
     }
 
     auto keyPtrOpt = ReadU64(*viewObjOpt + 8);
     if (!keyPtrOpt || !*keyPtrOpt) {
-        DebugLog(L"car-name: key pointer read failed (view_obj+8)");
+        if (verbose) DebugLog(L"car-name: key pointer read failed (view_obj+8)");
         return std::nullopt;
     }
 
     auto key = ReadCString(static_cast<uintptr_t>(*keyPtrOpt), 64);
     if (!key || key->empty()) {
-        DebugLog(L"car-name: key cstring read failed or empty");
+        if (verbose) DebugLog(L"car-name: key cstring read failed or empty");
         return std::nullopt;
     }
+    return *key;
+}
+
+std::optional<std::string> LocalPlayerCarName(uintptr_t tableBase) {
+    auto key = LocalPlayerCarKey(tableBase, true);
+    if (!key) return std::nullopt;
     DebugLog((L"car-name: resolved key '" + WidenAscii(*key) + L"', looking it up in cars5.ccrs").c_str());
 
     auto entry = FindVehicleNameKeyInSave(*key);
