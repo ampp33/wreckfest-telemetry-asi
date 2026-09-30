@@ -6,10 +6,13 @@
 #include <cstdlib>
 #include <map>
 #include <string>
+#include <vector>
 
 #include "lz4.h"
+#include "tuning/AssemblyTuning.h"
 #include "tuning/Lz4Block.h"
 #include "tuning/SaveFileTuning.h"
+#include "tuning/TuningDisplay.h"
 #include "tuning/TuningMerge.h"
 
 namespace {
@@ -108,31 +111,62 @@ void TestMatchCars5CodenameExactOnly() {
     Check(!noMatch.has_value(), "MatchCars5Codename: no match for an unrelated prefix");
 }
 
-void TestFnv1aMatchesPython() {
-    // Reference values from wreckfest_telemetry.py's fnv1a().
-    using wreckfest_telemetry::Fnv1a;
-    Check(Fnv1a("") == 2166136261u, "Fnv1a: empty input is the offset basis");
-    Check(Fnv1a("TUNE_SLIDER_SUSPENSION_TRACK") == 452048435u, "Fnv1a: SUSPENSION slider");
-    Check(Fnv1a("TUNE_SLIDER_GEARING_TRACK") == 1300644595u, "Fnv1a: GEARING slider");
-    Check(Fnv1a("TUNE_SLIDER_BRAKES_TRACK") == 1089512086u, "Fnv1a: BRAKES slider");
+void TestParseAssemblyName() {
+    using wreckfest_telemetry::ParseAssemblyName;
+
+    // Names seen live 2026-09-29 (24-car AI race, local player in slot 0).
+    auto local = ParseAssemblyName("vehicle/00/04_european_790483856/assembly.veas");
+    Check(local && local->slot == 0 && local->codename == "04_european" && !local->ai,
+          "ParseAssemblyName: local player's car");
+    auto ai = ParseAssemblyName("vehicle/23/04_european_ai_729575408/assembly.veas");
+    Check(ai && ai->slot == 23 && ai->codename == "04_european" && ai->ai,
+          "ParseAssemblyName: AI car of the same model, '_ai' stripped from the codename");
+    auto multi = ParseAssemblyName("vehicle/03/03_american_01_ai_736577360/assembly.veas");
+    Check(multi && multi->codename == "03_american_01" && multi->ai, "ParseAssemblyName: codename with underscores");
+
+    Check(!ParseAssemblyName("vehicle/00/04_european_790483856/assemblyRuntime.vear"),
+          "ParseAssemblyName: other per-car resources rejected");
+    Check(!ParseAssemblyName("vehicle/00/damage_contact_info"), "ParseAssemblyName: non-car entry rejected");
+    Check(!ParseAssemblyName("vehicle/0x/04_european_790483856/assembly.veas"), "ParseAssemblyName: bad slot");
+    Check(!ParseAssemblyName("vehicle/00/04_european/assembly.veas"), "ParseAssemblyName: missing spawn id");
 }
 
-void TestLiveTuningMerge() {
-    using wreckfest_telemetry::IsUninitializedLiveTuning;
-    using wreckfest_telemetry::MergeTuning;
+void TestTuningFromPartPaths() {
+    using wreckfest_telemetry::TuningFromPartPaths;
+    using Tuning = std::map<std::string, int>;
 
-    std::map<std::string, int> allZero = {{"SUSPENSION", 0}, {"GEARING", 0}, {"DIFFERENTIAL", 0}, {"BRAKES", 0}};
-    Check(IsUninitializedLiveTuning(allZero), "IsUninitializedLiveTuning: all four zero");
-    Check(IsUninitializedLiveTuning({{"SUSPENSION", 0}, {"GEARING", 0}, {"BRAKES", 0}}),
-          "IsUninitializedLiveTuning: all resolved categories zero");
-    Check(!IsUninitializedLiveTuning({{"SUSPENSION", 0}, {"GEARING", 2}}),
-          "IsUninitializedLiveTuning: a real zero mixed with other values is kept");
-    Check(!IsUninitializedLiveTuning({}), "IsUninitializedLiveTuning: empty reading");
+    // Excerpt of a live assembly (Super Venom tuned 2-1-2-4 SUSP-GEAR-DIFF-BRAK).
+    std::vector<std::string> paths = {
+        "vehicle/00/26_race_car_790484880/data/vehicle/26_race_car/part/chassis.vecs",
+        "data/vehicle/26_race_car/part/engine/a_class/air_filter/stock.vefi",
+        "data/vehicle/26_race_car/part/gearbox/eshort.vege",
+        "data/vehicle/26_race_car/part/transmission/soft.vetr",
+        "data/vehicle/26_race_car/part/suspension/msoft.vesu",
+        "data/vehicle/26_race_car/part/suspension/visual.vesv",
+        "data/vehicle/26_race_car/part/brakes/mfront.vebr",
+        "data/vehicle/26_race_car/part/steering.vest",
+        "data/vehicle/shared/physics/steering/default_faster.vpst",
+    };
+    Check(TuningFromPartPaths(paths, "26_race_car") ==
+              Tuning{{"GEARING", 0}, {"DIFFERENTIAL", 1}, {"SUSPENSION", 1}, {"BRAKES", 3}},
+          "TuningFromPartPaths: all four categories, non-tuning parts ignored");
+    Check(TuningFromPartPaths(paths, "04_european").empty(), "TuningFromPartPaths: another car's paths don't count");
+    Check(TuningFromPartPaths({"data/vehicle/26_race_car/part/gearbox/bogus.vege"}, "26_race_car").empty(),
+          "TuningFromPartPaths: unknown preset omitted");
+}
+
+void TestMergeTuning() {
+    using wreckfest_telemetry::MergeTuning;
 
     std::map<std::string, int> save = {{"SUSPENSION", 2}, {"GEARING", 4}, {"DIFFERENTIAL", 4}, {"BRAKES", 1}};
     auto merged = MergeTuning(save, {{"SUSPENSION", 4}, {"BRAKES", 0}});
     std::map<std::string, int> expected = {{"SUSPENSION", 4}, {"GEARING", 4}, {"DIFFERENTIAL", 4}, {"BRAKES", 0}};
-    Check(merged == expected, "MergeTuning: live wins per category, save fills the rest");
+    Check(merged == expected, "MergeTuning: overlay wins per category, base fills the rest");
+
+    std::map<std::string, int> display = wreckfest_telemetry::ToDisplayTuning(expected);
+    std::map<std::string, int> expectedDisplay = {{"SUSPENSION", 5}, {"GEARING", 5}, {"DIFFERENTIAL", 5}, {"BRAKES", 1}};
+    Check(display == expectedDisplay, "ToDisplayTuning: every value shifted 0-4 -> 1-5");
+    Check(expected["BRAKES"] == 0, "ToDisplayTuning: input left untouched");
 }
 
 }  // namespace
@@ -144,8 +178,9 @@ int main() {
     TestExtractCars5DisplayNames();
     TestFindVehicleNameKey();
     TestMatchCars5CodenameExactOnly();
-    TestFnv1aMatchesPython();
-    TestLiveTuningMerge();
+    TestParseAssemblyName();
+    TestTuningFromPartPaths();
+    TestMergeTuning();
 
     if (g_failures == 0) {
         std::printf("all tests passed\n");

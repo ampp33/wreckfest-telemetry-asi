@@ -6,6 +6,7 @@
 #include <fstream>
 #include <sstream>
 
+#include "debug/DebugLog.h"
 #include "net/SupabaseClient.h"
 
 namespace wreckfest_telemetry {
@@ -104,6 +105,10 @@ FlushResult FlushQueue(const ApiConfig& config, const std::wstring& queuePath, c
     while (!entries.empty()) {
         QueueEntry& entry = entries.front();
         auto result = PostPayload(config, entry.payload, timeoutSeconds);
+        DebugLog((L"API post (queued race from " + WidenAscii(entry.queued_at) + L", vehicle '" +
+                  WidenAscii(entry.payload.value("vehicle", "")) + L"'): " + WidenAscii(result.message) +
+                  (result.ok ? L"" : result.retryable ? L" -- will retry" : L" -- giving up (failed_races.jsonl)"))
+                     .c_str());
         if (result.ok) {
             entries.erase(entries.begin());
             WriteQueue(queuePath, entries);
@@ -132,11 +137,15 @@ void PostOrQueue(const ApiConfig& config, nlohmann::json payload, const std::wst
         remaining = FlushQueue(config, queuePath, deadPath).remaining;
     }
     if (remaining) {
+        DebugLog(L"API post deferred: queued behind an unflushed backlog");
         EnqueuePayload(queuePath, std::move(payload), "queued behind an unflushed backlog");
         return;
     }
 
     auto result = PostPayload(config, payload);
+    DebugLog((L"API post: " + WidenAscii(result.message) +
+              (result.ok ? L"" : result.retryable ? L" -- queued for retry" : L" -- giving up (failed_races.jsonl)"))
+                 .c_str());
     if (result.ok) return;
     if (result.retryable) {
         EnqueuePayload(queuePath, std::move(payload), result.message);

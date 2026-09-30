@@ -3,6 +3,7 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace wreckfest_telemetry {
@@ -15,6 +16,10 @@ namespace wreckfest_telemetry {
 // matching the Python tool's own glob directly. Picks the most recently
 // modified match if several are found. nullopt if none resolve.
 std::optional<std::wstring> FindCars5Path();
+
+// `path`'s last-modified time as local "YYYY-MM-DD HH:MM:SS", or
+// "(unknown)" -- debug-log only.
+std::wstring FileModifiedTime(const std::wstring& path);
 
 // Parses the 20-byte header + chained-LZ4 chunk structure. nullopt if the
 // header doesn't look like a cars5.ccrs file, or if any chunk fails to
@@ -50,6 +55,23 @@ std::optional<VehicleNameEntry> FindVehicleNameKey(const std::vector<std::string
 // (the same file ReadTuningFromSave() reads). nullopt on any failure (no
 // save file, key not present, ...).
 std::optional<VehicleNameEntry> FindVehicleNameKeyInSave(const std::string& key);
+
+// One tuning category as the game names its parts: part-path key (the
+// "<part>" in "data/vehicle/<codename>/part/<part>/<preset>.<ext>"), the
+// category label used everywhere else, and its presets in slider order.
+// Shared by the save file and the race car's assembly, which both name
+// the equipped part by the same path.
+struct TuningPart {
+    std::string part;
+    std::string category;
+    std::vector<std::string> presets;
+};
+const std::vector<TuningPart>& TuningParts();
+
+// {category, 0-4 index} for a part-path key + preset name, e.g.
+// ("gearbox", "wide") -> {"GEARING", 3}. nullopt for a non-tuning part or
+// an unknown preset.
+std::optional<std::pair<std::string, int>> TuningPresetIndex(const std::string& part, const std::string& preset);
 
 // Exact match only -- see SaveFileTuning.cpp for why a prefix-match
 // fallback is actively dangerous here.

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <map>
 #include <optional>
 #include <string>
 
@@ -8,6 +9,13 @@
 
 namespace wreckfest_telemetry {
 
+// Tuning (category -> 0-4 index) as the API's field names, 1-5:
+// {"suspension", "gear_ratio", "differential", "brake_balance"}, each only
+// if present. nullopt if none are. Used for the payload's top-level fields
+// and each player's "tuning" object.
+std::optional<nlohmann::json> TuningToApiFields(const std::map<std::string, int>& tuning);
+
+// Each player's "tuning" (when any category resolved) is the object above.
 // include_laps=false OMITS the lap-time keys entirely rather than emitting
 // empty lists -- [] already means "splits couldn't be validated", so
 // reusing it for "not logged by configuration" would conflate the two.
@@ -23,7 +31,8 @@ nlohmann::json RaceToDict(const RaceResult& race, bool opponentLaps = false);
 bool AppendRaceLog(const RaceResult& race, const std::wstring& logPath, bool opponentLaps = false);
 
 // The API POST body. nullopt if no local player was identified (caller
-// skips posting). Tuning categories are 0-4 internally, sent 1-5; a
+// skips posting). Tuning categories are 0-4 internally, sent 1-5 (as are the values in
+// the JSONL log -- see ToDisplayTuning in tuning/TuningDisplay.h); a
 // category/lap_count/lap_times_ms with nothing to report is omitted
 // entirely, not sent as a null/empty placeholder. Driving-assist settings
 // (shifting/abs/traction_control/stability_control), when resolved, are

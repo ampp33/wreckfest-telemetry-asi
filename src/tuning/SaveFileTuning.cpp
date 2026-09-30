@@ -228,6 +228,26 @@ std::optional<std::string> MatchCars5Codename(const std::string& carName,
     return std::nullopt;
 }
 
+const std::vector<TuningPart>& TuningParts() {
+    static const std::vector<TuningPart> kParts = {
+        {"suspension", "SUSPENSION", {"soft", "msoft", "standard", "mhard", "hard"}},
+        {"gearbox", "GEARING", {"eshort", "short", "std", "wide", "ewide"}},
+        {"transmission", "DIFFERENTIAL", {"open", "soft", "limited", "stiff", "locked"}},
+        {"brakes", "BRAKES", {"rear", "mrear", "stock", "mfront", "front"}},
+    };
+    return kParts;
+}
+
+std::optional<std::pair<std::string, int>> TuningPresetIndex(const std::string& part, const std::string& preset) {
+    for (const auto& entry : TuningParts()) {
+        if (entry.part != part) continue;
+        auto it = std::find(entry.presets.begin(), entry.presets.end(), preset);
+        if (it == entry.presets.end()) return std::nullopt;
+        return std::make_pair(entry.category, static_cast<int>(std::distance(entry.presets.begin(), it)));
+    }
+    return std::nullopt;
+}
+
 std::map<std::string, int> ResolveTuningIndices(const std::vector<std::string>& chunks,
                                                  const std::string& carName) {
     std::map<std::string, int> result;
@@ -244,6 +264,15 @@ std::map<std::string, int> ResolveTuningIndices(const std::vector<std::string>& 
                      .c_str());
         return result;
     }
+    // MatchCars5Codename() takes the first match, so a display name shared
+    // by several codenames would silently read the wrong car's tuning.
+    std::wstring sameName;
+    for (const auto& [otherCodename, name] : displayNames) {
+        if (name == carName && otherCodename != *codename) sameName += L" '" + WidenAscii(otherCodename) + L"'";
+    }
+    DebugLog((L"tuning: display name '" + WidenAscii(carName) + L"' -> codename '" + WidenAscii(*codename) + L"'" +
+              (sameName.empty() ? L"" : L" -- WARNING: also shared by" + sameName + L", which were ignored"))
+                 .c_str());
     auto carIt = cars.find(*codename);
     if (carIt == cars.end()) {
         DebugLog((L"tuning: matched codename '" + WidenAscii(*codename) +
@@ -252,23 +281,23 @@ std::map<std::string, int> ResolveTuningIndices(const std::vector<std::string>& 
         return result;
     }
 
-    struct PresetEntry {
-        std::string key;
-        std::string label;
-        std::vector<std::string> presets;
-    };
-    static const std::vector<PresetEntry> kPresetTable = {
-        {"gearbox", "GEARING", {"eshort", "short", "std", "wide", "ewide"}},
-        {"transmission", "DIFFERENTIAL", {"open", "soft", "limited", "stiff", "locked"}},
-        {"suspension", "SUSPENSION", {"soft", "msoft", "standard", "mhard", "hard"}},
-        {"brakes", "BRAKES", {"rear", "mrear", "stock", "mfront", "front"}},
-    };
-    for (const auto& entry : kPresetTable) {
-        auto partIt = carIt->second.find(entry.key);
-        if (partIt == carIt->second.end()) continue;
-        auto presetIt = std::find(entry.presets.begin(), entry.presets.end(), partIt->second);
-        if (presetIt != entry.presets.end()) {
-            result[entry.label] = static_cast<int>(std::distance(entry.presets.begin(), presetIt));
+    for (const auto& entry : TuningParts()) {
+        auto partIt = carIt->second.find(entry.part);
+        if (partIt == carIt->second.end()) {
+            DebugLog((L"tuning: save file " + WidenAscii(entry.category) + L" -- no '" + WidenAscii(entry.part) +
+                      L"' part recorded for this car")
+                         .c_str());
+            continue;
+        }
+        if (auto index = TuningPresetIndex(entry.part, partIt->second)) {
+            result[entry.category] = index->second;
+            DebugLog((L"tuning: save file " + WidenAscii(entry.category) + L" = " + std::to_wstring(index->second + 1) +
+                      L" (preset '" + WidenAscii(partIt->second) + L"')")
+                         .c_str());
+        } else {
+            DebugLog((L"tuning: save file " + WidenAscii(entry.category) + L" -- unrecognised preset '" +
+                      WidenAscii(partIt->second) + L"', omitted")
+                         .c_str());
         }
     }
     return result;
@@ -284,7 +313,7 @@ std::optional<std::vector<std::string>> LoadCars5Chunks() {
         DebugLog(L"cars5.ccrs: path not found (Steam userdata glob missed)");
         return std::nullopt;
     }
-    DebugLog((L"cars5.ccrs: using file at '" + *path + L"'").c_str());
+    DebugLog((L"cars5.ccrs: using file at '" + *path + L"' (last modified " + FileModifiedTime(*path) + L")").c_str());
 
     std::ifstream in(NarrowPath(*path), std::ios::binary);
     if (!in) {
