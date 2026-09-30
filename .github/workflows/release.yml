@@ -1,17 +1,16 @@
 name: Release
 
-# Builds wreckfest_telemetry.asi (cross-compiled via MinGW-w64, same
-# toolchain path as the Docker/local Linux build documented in the
-# README) and publishes it as a GitHub Release, so users can download a
-# working binary without building it themselves.
-#
-# Trigger: push a version tag, e.g. `git tag v0.1.0 && git push origin v0.1.0`.
-
 on:
   push:
     tags:
       - "v*.*.*"
+      - "v*.*"
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "New version tag to create and release (e.g. v0.1.0) -- must not already exist"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -19,35 +18,38 @@ permissions:
 jobs:
   build-and-release:
     runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ inputs.tag || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Determine version
+      - name: Validate version
         run: |
-          # Tag pushes (the release path) get the tag itself, e.g. v0.1.0.
-          # A manual workflow_dispatch run isn't on a tag -- github.ref_name
-          # would just be the branch name there, so fall back to a "dev-"
-          # + short SHA build identifier instead.
-          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
-            VERSION="${GITHUB_REF_NAME}"
-          else
-            VERSION="dev-$(git rev-parse --short HEAD)"
+          if [[ ! "${VERSION}" =~ ^v[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
+            echo "::error::'${VERSION}' isn't a version tag -- expected vX.Y or vX.Y.Z (e.g. v0.1.0)"
+            exit 1
           fi
-          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
 
-      - name: Install toolchain
-        run: sudo apt-get update && sudo apt-get install -y cmake mingw-w64
+      - name: Check tag doesn't already exist
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/${VERSION}" > /dev/null; then
+            echo "::error::Tag '${VERSION}' already exists -- pick a new version, or delete the existing tag first if you really mean to re-release it"
+            exit 1
+          fi
 
+      # Host-side tests build natively with the runner's preinstalled
+      # cmake/gcc -- the Docker image only carries the cross toolchain.
       - name: Run host-side tests
         run: |
           cmake -B build-host .
           cmake --build build-host
           ctest --test-dir build-host --output-on-failure
 
-      - name: Cross-compile the plugin
+      - name: Build
         run: |
-          cmake -B build -DCMAKE_TOOLCHAIN_FILE=cmake/mingw-w64-x86_64.cmake -DCMAKE_BUILD_TYPE=Release
-          cmake --build build
+          docker build -t wreckfest-telemetry-asi-builder .
+          docker run --rm --user "$(id -u):$(id -g)" -v "$(pwd):/src" wreckfest-telemetry-asi-builder
 
       - name: Verify output
         run: |
@@ -55,7 +57,8 @@ jobs:
           # Confirm no dependency beyond standard Windows system DLLs --
           # anything else means the static-link flags didn't take, and the
           # game's install dir won't have the missing DLL.
-          DEPS="$(x86_64-w64-mingw32-objdump -p build/wreckfest_telemetry.asi | grep 'DLL Name' | awk '{print $3}')"
+          DEPS="$(docker run --rm -v "$(pwd)/build:/build" --entrypoint x86_64-w64-mingw32-objdump \
+            wreckfest-telemetry-asi-builder -p /build/wreckfest_telemetry.asi | grep 'DLL Name' | awk '{print $3}')"
           echo "$DEPS"
           echo "$DEPS" | grep -viqE '^(ADVAPI32\.dll|KERNEL32\.dll|msvcrt\.dll|WINHTTP\.dll)$' && \
             { echo "unexpected DLL dependency"; exit 1; } || true
@@ -71,32 +74,27 @@ jobs:
           unzip -p ual.zip version.dll > dist/version.dll
 
           # Version goes in the .asi filename itself, not just the zip --
-          # once extracted into the game's install root, the zip name is
-          # gone, and this is the only way someone can tell what version
-          # they have installed later.
+          # once extracted into the game's install root, so that users can
+          # tell which version of the plugin they have installed
           cp build/wreckfest_telemetry.asi "dist/scripts/wreckfest_telemetry-${VERSION}.asi"
           echo "your-per-user-api-key-from-settings-page" > dist/scripts/api-key.txt
 
           cd dist && zip -r "../wreckfest-telemetry-asi-${VERSION}.zip" .
 
+      # Only tagged after the build passes, so a failed run doesn't leave
+      # a tag behind. A tag pushed with GITHUB_TOKEN doesn't trigger this
+      # workflow again, so there's no duplicate tag-push run.
+      - name: Create tag
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          git tag "${VERSION}" "${GITHUB_SHA}"
+          git push origin "refs/tags/${VERSION}"
+
       - name: Create release
-        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.VERSION }}
           files: wreckfest-telemetry-asi-${{ env.VERSION }}.zip
           generate_release_notes: true
           body: |
-            See the [README](https://github.com/${{ github.repository }}#installing) for install
-            steps: extract this zip into your Wreckfest install root -- it bundles
-            [Ultimate ASI Loader](https://github.com/ThirteenAG/Ultimate-ASI-Loader) (`version.dll`)
-            and a `scripts/` folder with `wreckfest_telemetry-${{ env.VERSION }}.asi` and
-            `api-key.txt` -- then put your API key from the
-            [settings page](https://wfracelog.com/#/settings/api-keys) into `scripts/api-key.txt`,
-            and add the `WINEDLLOVERRIDES` launch option if you're on Steam Play (Proton).
-
-      - name: Upload workflow artifact
-        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: wreckfest-telemetry-asi
-          path: dist/
+            See the [README](https://github.com/${{ github.repository }}#installing) for installation steps.
