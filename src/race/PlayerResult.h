@@ -50,6 +50,10 @@ struct RaceResult {
     // "not resolved", omitted from output rather than exported as a
     // misleading zero.
     int vehicle_weight_kg = 0;
+    // Online server the race was run on, raw with its color codes -- see
+    // ServerName.h. Empty for offline races (or unresolved), omitted from
+    // output.
+    std::string server_name;
 };
 
 inline char ClassFromRating(int rating) {

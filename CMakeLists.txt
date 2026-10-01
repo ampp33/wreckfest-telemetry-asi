@@ -33,6 +33,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
         src/strings/TrackDetection.cpp
         src/strings/AssistSettings.cpp
         src/strings/VehicleWeight.cpp
+        src/strings/ServerName.cpp
+        src/strings/Utf8.cpp
         src/tuning/Lz4Block.cpp
         src/tuning/SaveFileTuning.cpp
         src/tuning/Cars5Path.cpp

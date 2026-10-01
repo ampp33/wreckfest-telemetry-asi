@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "lz4.h"
+#include "strings/Utf8.h"
 #include "tuning/AssemblyTuning.h"
 #include "tuning/Lz4Block.h"
 #include "tuning/SaveFileTuning.h"
@@ -155,6 +156,20 @@ void TestTuningFromPartPaths() {
           "TuningFromPartPaths: unknown preset omitted");
 }
 
+void TestSanitizeUtf8() {
+    using wreckfest_telemetry::SanitizeUtf8;
+
+    // Raw server name seen live, color codes intact.
+    std::string wwf = "^7WWF ^1| ^7Wednesday Wreck Fest ^1| ^7No Rules ^1| ^7Voting ^1";
+    Check(SanitizeUtf8(wwf) == wwf, "SanitizeUtf8: ASCII with color codes unchanged");
+    Check(SanitizeUtf8("Caf\xC3\xA9 \xE2\x9C\x93 \xF0\x9F\x8F\x81") == "Caf\xC3\xA9 \xE2\x9C\x93 \xF0\x9F\x8F\x81",
+          "SanitizeUtf8: valid 2/3/4-byte sequences kept");
+    Check(SanitizeUtf8("Caf\xE9") == "Caf?", "SanitizeUtf8: Latin-1 byte replaced");
+    Check(SanitizeUtf8("a\xC3") == "a?", "SanitizeUtf8: truncated sequence replaced");
+    Check(SanitizeUtf8("\xC0\xAF") == "??", "SanitizeUtf8: overlong encoding replaced");
+    Check(SanitizeUtf8("\xED\xA0\x80") == "???", "SanitizeUtf8: UTF-16 surrogate replaced");
+}
+
 void TestMergeTuning() {
     using wreckfest_telemetry::MergeTuning;
 
@@ -180,6 +195,7 @@ int main() {
     TestMatchCars5CodenameExactOnly();
     TestParseAssemblyName();
     TestTuningFromPartPaths();
+    TestSanitizeUtf8();
     TestMergeTuning();
 
     if (g_failures == 0) {

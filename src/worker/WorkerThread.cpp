@@ -22,6 +22,7 @@
 #include "race/RaceFinality.h"
 #include "strings/AssistSettings.h"
 #include "strings/HashRegistry.h"
+#include "strings/ServerName.h"
 #include "strings/TrackDetection.h"
 #include "strings/VehicleWeight.h"
 #include "tuning/RaceCarTuning.h"
@@ -225,7 +226,9 @@ void RunOneTick(const PollContext& ctx, WorkerLoopState& state) {
             int opponentCount = 0;
             std::map<std::string, std::string> assists;
             int vehicleWeightKg = 0;
+            std::string serverName;
             if (tableBase) {
+                serverName = ReadOnlineServerName(*tableBase).value_or("");
                 std::tie(track, variation) = DetectTrackAndVariation(ctx.base, *tableBase);
                 std::tie(lapCount, opponentCount) = ReadRaceSettings(*tableBase);
                 assists = ReadAssistSettings(*tableBase);
@@ -261,6 +264,7 @@ void RunOneTick(const PollContext& ctx, WorkerLoopState& state) {
             race.tuning = tuning;
             race.assists = assists;
             race.vehicle_weight_kg = vehicleWeightKg;
+            race.server_name = serverName;
             race.players = players;
 
             bool identityTrusted = true;
