@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "debug/DebugLog.h"
+#include "PluginVersion.h"
 #include "io/Config.h"
 #include "io/JsonlLog.h"
 #include "io/PluginPaths.h"
@@ -22,6 +23,7 @@
 #include "race/RaceFinality.h"
 #include "strings/AssistSettings.h"
 #include "strings/HashRegistry.h"
+#include "strings/ServerName.h"
 #include "strings/TrackDetection.h"
 #include "strings/VehicleWeight.h"
 #include "tuning/RaceCarTuning.h"
@@ -225,7 +227,9 @@ void RunOneTick(const PollContext& ctx, WorkerLoopState& state) {
             int opponentCount = 0;
             std::map<std::string, std::string> assists;
             int vehicleWeightKg = 0;
+            std::string serverName;
             if (tableBase) {
+                serverName = ReadOnlineServerName(*tableBase).value_or("");
                 std::tie(track, variation) = DetectTrackAndVariation(ctx.base, *tableBase);
                 std::tie(lapCount, opponentCount) = ReadRaceSettings(*tableBase);
                 assists = ReadAssistSettings(*tableBase);
@@ -239,7 +243,7 @@ void RunOneTick(const PollContext& ctx, WorkerLoopState& state) {
             // behind a tune set after Restart or before backing out of the
             // Tune screen).
             auto raceCars = ReadRaceCars(tableBase.value_or(0));
-            AssignOpponentTunings(players, raceCars);
+            AssignRaceCars(players, raceCars);
             std::map<std::string, int> tuning;
             if (local) {
                 auto carKey = tableBase ? LocalPlayerCarKey(*tableBase, true) : std::nullopt;
@@ -261,6 +265,7 @@ void RunOneTick(const PollContext& ctx, WorkerLoopState& state) {
             race.tuning = tuning;
             race.assists = assists;
             race.vehicle_weight_kg = vehicleWeightKg;
+            race.server_name = serverName;
             race.players = players;
 
             bool identityTrusted = true;
@@ -311,7 +316,8 @@ void RunPollLoop(HMODULE hModule) {
         InitDebugLog(PluginFilePath(hModule, L"debug_log.txt"));
         DebugLog(markerFound ? L"debug logging enabled (debug.txt marker found)"
                              : L"debug logging enabled (always on in this build)");
-        DebugLog((L"plugin build: " + WidenAscii(__DATE__ " " __TIME__)).c_str());
+        DebugLog((L"plugin version " + WidenAscii(kPluginVersion) + L", built " + WidenAscii(__DATE__ " " __TIME__))
+                     .c_str());
     }
 
     ctx.apiConfig.api_key = LoadApiKey(PluginFilePath(hModule, L"api-key.txt"));
