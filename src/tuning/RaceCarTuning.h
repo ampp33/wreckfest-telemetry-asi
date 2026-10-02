@@ -25,10 +25,11 @@ struct RaceCar {
 // the end -- it scans the whole registry.
 std::vector<RaceCar> ReadRaceCars(uintptr_t tableBase);
 
-// Sets each non-local player's `tuning` from the race car in their slot
-// (so AI players get none). A slot with more than one car is ambiguous and
-// skipped.
-void AssignOpponentTunings(std::vector<PlayerResult>& players, const std::vector<RaceCar>& cars);
+// Matches each player to the race car in their slot: sets `ai` for every
+// player, and `tuning` for each non-local one (so AI players get none; the
+// local player's comes from ReadTuningForRace()). A slot with more than one
+// car is ambiguous and leaves the player unmatched.
+void AssignRaceCars(std::vector<PlayerResult>& players, const std::vector<RaceCar>& cars);
 
 // Tuning of the local player's car as actually built for the race: the
 // non-AI car in `localSlot` whose codename matches `codename` (when known);

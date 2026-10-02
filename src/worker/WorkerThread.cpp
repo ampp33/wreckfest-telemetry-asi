@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "debug/DebugLog.h"
+#include "PluginVersion.h"
 #include "io/Config.h"
 #include "io/JsonlLog.h"
 #include "io/PluginPaths.h"
@@ -242,7 +243,7 @@ void RunOneTick(const PollContext& ctx, WorkerLoopState& state) {
             // behind a tune set after Restart or before backing out of the
             // Tune screen).
             auto raceCars = ReadRaceCars(tableBase.value_or(0));
-            AssignOpponentTunings(players, raceCars);
+            AssignRaceCars(players, raceCars);
             std::map<std::string, int> tuning;
             if (local) {
                 auto carKey = tableBase ? LocalPlayerCarKey(*tableBase, true) : std::nullopt;
@@ -315,7 +316,8 @@ void RunPollLoop(HMODULE hModule) {
         InitDebugLog(PluginFilePath(hModule, L"debug_log.txt"));
         DebugLog(markerFound ? L"debug logging enabled (debug.txt marker found)"
                              : L"debug logging enabled (always on in this build)");
-        DebugLog((L"plugin build: " + WidenAscii(__DATE__ " " __TIME__)).c_str());
+        DebugLog((L"plugin version " + WidenAscii(kPluginVersion) + L", built " + WidenAscii(__DATE__ " " __TIME__))
+                     .c_str());
     }
 
     ctx.apiConfig.api_key = LoadApiKey(PluginFilePath(hModule, L"api-key.txt"));

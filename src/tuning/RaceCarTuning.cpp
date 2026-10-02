@@ -63,9 +63,9 @@ std::vector<RaceCar> ReadRaceCars(uintptr_t tableBase) {
     return cars;
 }
 
-void AssignOpponentTunings(std::vector<PlayerResult>& players, const std::vector<RaceCar>& cars) {
+void AssignRaceCars(std::vector<PlayerResult>& players, const std::vector<RaceCar>& cars) {
     for (auto& p : players) {
-        if (p.is_local || !p.slot_index) continue;
+        if (!p.slot_index) continue;
         const RaceCar* match = nullptr;
         int matches = 0;
         for (const auto& car : cars) {
@@ -75,10 +75,11 @@ void AssignOpponentTunings(std::vector<PlayerResult>& players, const std::vector
             }
         }
         if (matches == 1) {
-            p.tuning = match->tuning;  // empty for an AI car
+            p.ai = match->ai;
+            if (!p.is_local) p.tuning = match->tuning;  // empty for an AI car
         } else if (matches > 1) {
             DebugLog((L"tuning: slot " + std::to_wstring(*p.slot_index) + L" has " + std::to_wstring(matches) +
-                      L" race car assemblies -- ambiguous, '" + WidenAscii(p.name) + L"' left without tuning")
+                      L" race car assemblies -- ambiguous, '" + WidenAscii(p.name) + L"' left unmatched")
                          .c_str());
         }
     }

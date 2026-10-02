@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <fstream>
 
+#include "PluginVersion.h"
 #include "strings/Utf8.h"
 #include "tuning/TuningDisplay.h"
 
@@ -59,6 +60,7 @@ nlohmann::json PlayerToDict(const PlayerResult& p, bool includeLaps) {
         {"laps_completed", std::max(0, p.laps_completed - 1)},
     };
     if (auto tuning = TuningToApiFields(p.tuning)) d["tuning"] = *tuning;
+    if (p.ai) d["ai"] = *p.ai;
     if (includeLaps) {
         d["lap_times_ms"] = p.lap_times_ms;
         std::vector<std::string> laps;
@@ -88,6 +90,7 @@ nlohmann::json RaceToDict(const RaceResult& race, bool opponentLaps) {
     if (!race.assists.empty()) d["assists"] = race.assists;
     if (race.vehicle_weight_kg) d["vehicle_weight_kg"] = race.vehicle_weight_kg;
     if (!race.server_name.empty()) d["server_name"] = SanitizeUtf8(race.server_name);
+    d["plugin_version"] = kPluginVersion;
 
     nlohmann::json othersArr = nlohmann::json::array();
     for (const auto* p : others) othersArr.push_back(PlayerToDict(*p, opponentLaps));
@@ -117,6 +120,7 @@ std::optional<nlohmann::json> BuildApiPayload(const RaceResult& race) {
     if (!race.assists.empty()) payload["assists"] = race.assists;
     if (race.vehicle_weight_kg) payload["vehicle_weight_kg"] = race.vehicle_weight_kg;
     if (!race.server_name.empty()) payload["server_name"] = SanitizeUtf8(race.server_name);
+    payload["plugin_version"] = kPluginVersion;
 
     std::vector<const PlayerResult*> rosterPlayers;
     rosterPlayers.reserve(race.players.size());

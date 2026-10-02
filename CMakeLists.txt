@@ -16,6 +16,11 @@ endif()
 
 include(cmake/Dependencies.cmake)
 
+# Release version baked into the plugin (see src/PluginVersion.h) and sent
+# with every race. The release workflow sets it to the git tag; anything
+# else builds as "dev".
+set(PLUGIN_VERSION "dev" CACHE STRING "Plugin version reported to the API, e.g. 1.2.0")
+
 # ── Plugin DLL (Windows target only -- requires the MinGW toolchain file) ────
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
     add_library(wreckfest_telemetry SHARED
@@ -61,6 +66,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
     target_include_directories(wreckfest_telemetry SYSTEM PRIVATE
         ${DEPS_DIR}
     )
+
+    target_compile_definitions(wreckfest_telemetry PRIVATE WFT_PLUGIN_VERSION="${PLUGIN_VERSION}")
 
     target_link_libraries(wreckfest_telemetry PRIVATE
         winhttp

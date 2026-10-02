@@ -30,6 +30,11 @@ struct PlayerResult {
     // with ToDisplayTuning before output). Only the categories that
     // resolved; empty if none did.
     std::map<std::string, int> tuning;
+    // Whether this racer is an AI bot, from their race car's registry
+    // assembly (AI cars carry an "_ai" codename). nullopt if their car
+    // couldn't be matched to their slot -- left out of the output rather
+    // than guessed.
+    std::optional<bool> ai;
 
     bool dnf() const { return (status_flags & offsets::STATUS_DNF_BIT) != 0; }
 };

@@ -49,11 +49,18 @@ jobs:
       - name: Build
         run: |
           docker build -t wreckfest-telemetry-asi-builder .
-          docker run --rm --user "$(id -u):$(id -g)" -v "$(pwd):/src" wreckfest-telemetry-asi-builder
+          # PLUGIN_VERSION is baked into the plugin (src/PluginVersion.h) and
+          # sent to the API with every race -- the tag validated above, minus
+          # its leading "v" (v1.2.0 -> 1.2.0), the format the API documents.
+          docker run --rm --user "$(id -u):$(id -g)" -e PLUGIN_VERSION="${VERSION#v}" -v "$(pwd):/src" \
+            wreckfest-telemetry-asi-builder
 
       - name: Verify output
         run: |
           file build/wreckfest_telemetry.asi | grep "PE32+ executable"
+          # The version must actually have been baked in, not left at "dev".
+          grep -q "PLUGIN_VERSION:STRING=${VERSION#v}$" build/CMakeCache.txt || \
+            { echo "::error::plugin wasn't built with PLUGIN_VERSION=${VERSION#v}"; exit 1; }
           # Confirm no dependency beyond standard Windows system DLLs --
           # anything else means the static-link flags didn't take, and the
           # game's install dir won't have the missing DLL.
