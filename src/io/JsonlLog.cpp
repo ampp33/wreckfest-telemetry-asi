@@ -6,6 +6,7 @@
 
 #include "PluginVersion.h"
 #include "strings/Utf8.h"
+#include "tuning/CarParts.h"
 #include "tuning/TuningDisplay.h"
 
 namespace wreckfest_telemetry {
@@ -60,6 +61,7 @@ nlohmann::json PlayerToDict(const PlayerResult& p, bool includeLaps) {
         {"laps_completed", std::max(0, p.laps_completed - 1)},
     };
     if (auto tuning = TuningToApiFields(p.tuning)) d["tuning"] = *tuning;
+    if (!p.parts.empty()) d["parts"] = PartsToJson(p.parts);
     if (p.ai) d["ai"] = *p.ai;
     if (includeLaps) {
         d["lap_times_ms"] = p.lap_times_ms;
@@ -113,6 +115,10 @@ std::optional<nlohmann::json> BuildApiPayload(const RaceResult& race) {
         {"total_time_ms", local->total_time_ms},
     };
 
+    // Parts go out only inside results_roster entries (stored verbatim):
+    // every top-level field must match a parameter of the backend's RPC, so
+    // a top-level "parts" would get the whole race rejected until the
+    // backend adds one.
     if (auto tuning = TuningToApiFields(race.tuning)) payload.update(*tuning);
 
     if (race.lap_count) payload["lap_count"] = race.lap_count;

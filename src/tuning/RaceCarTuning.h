@@ -7,27 +7,30 @@
 #include <vector>
 
 #include "race/PlayerResult.h"
+#include "tuning/CarParts.h"
 
 namespace wreckfest_telemetry {
 
 // One car spawned for the race, from its registry assembly (see
 // AssemblyTuning.h). `tuning` holds whichever categories resolved, 0-4;
-// always empty for an AI car, whose tuning isn't read.
+// `tuning` and `parts` are always empty for an AI car, whose build isn't
+// read.
 struct RaceCar {
     std::string name;  // registry name, for logging
     int slot = -1;
     std::string codename;
     bool ai = false;
     std::map<std::string, int> tuning;
+    CarParts parts;
 };
 
 // Every race car's assembly currently registered. Call once per race, at
 // the end -- it scans the whole registry.
 std::vector<RaceCar> ReadRaceCars(uintptr_t tableBase);
 
-// Matches each player to the race car in their slot: sets `ai` for every
-// player, and `tuning` for each non-local one (so AI players get none; the
-// local player's comes from ReadTuningForRace()). A slot with more than one
+// Matches each player to the race car in their slot: sets `ai` and `parts`
+// for every player, and `tuning` for each non-local one (so AI players get
+// neither; the local player's tuning comes from ReadTuningForRace()). A slot with more than one
 // car is ambiguous and leaves the player unmatched.
 void AssignRaceCars(std::vector<PlayerResult>& players, const std::vector<RaceCar>& cars);
 

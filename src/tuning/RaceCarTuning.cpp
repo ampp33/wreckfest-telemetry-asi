@@ -1,5 +1,7 @@
 #include "tuning/RaceCarTuning.h"
 
+#include <chrono>
+
 #include "debug/DebugLog.h"
 #include "memory/ProcessMemory.h"
 #include "strings/HashRegistry.h"
@@ -31,6 +33,49 @@ std::vector<std::string> ReadAssemblyPaths(uintptr_t assembly) {
     return paths;
 }
 
+// A part object (resolved by its path through the registry) is a list of
+// properties, each a pointer to its "VEHICLE_UPGRADE_<FIELD>_<id>" loc key,
+// then the localized value 0x10 later and the bare field name 0x18 later.
+// The name, when present, has been the first such property (seen at +0x58
+// on armor/engine parts). Scanning stops at the first upgrade property so a
+// nameless part can't pick up the next object's name.
+constexpr uintptr_t kPartPropScanStart = 0x40;
+constexpr uintptr_t kPartPropScanEnd = 0x200;
+
+bool StartsWith(const std::string& s, const char* prefix) { return s.rfind(prefix, 0) == 0; }
+
+std::optional<std::string> PartDisplayName(uintptr_t tableBase, const std::string& path) {
+    auto obj = HashRegistryLookup(tableBase, path);
+    if (!obj || *obj == 0) return std::nullopt;
+    for (uintptr_t off = kPartPropScanStart; off < kPartPropScanEnd; off += 8) {
+        auto keyPtr = ReadU64(*obj + off);
+        if (!keyPtr || *keyPtr < 0x10000) continue;
+        auto key = ReadCString(static_cast<uintptr_t>(*keyPtr), 64);
+        if (!key || !StartsWith(*key, "VEHICLE_UPGRADE_")) continue;
+        if (!StartsWith(*key, "VEHICLE_UPGRADE_NAME_")) return std::nullopt;
+        auto fieldPtr = ReadU64(*obj + off + 0x18);
+        auto field = fieldPtr ? ReadCString(static_cast<uintptr_t>(*fieldPtr), 32) : std::nullopt;
+        if (!field || *field != "VEHICLE_UPGRADE_NAME") return std::nullopt;
+        auto valuePtr = ReadU64(*obj + off + 0x10);
+        auto value = valuePtr && *valuePtr >= 0x10000 ? ReadCString(static_cast<uintptr_t>(*valuePtr), 64) : std::nullopt;
+        if (!value || value->empty()) return std::nullopt;
+        return value;
+    }
+    return std::nullopt;
+}
+
+std::wstring FormatParts(const CarParts& parts) {
+    std::wstring out = L"engine=" + (parts.engine.empty() ? L"?" : WidenAscii(parts.engine)) + L" |";
+    for (const auto& [slot, preset] : parts.engine_parts) out += L" " + WidenAscii(slot) + L"=" + WidenAscii(preset);
+    out += L" | armor:";
+    for (const auto& [slot, part] : parts.armor) {
+        // Names can be non-ASCII in other game languages -- logged as a
+        // resolved/unresolved marker only, to keep the wide log stream safe.
+        out += L" " + WidenAscii(slot) + L"=" + WidenAscii(part.code) + (part.name ? L"(named)" : L"(no name)");
+    }
+    return out;
+}
+
 // Debug-log rendering: 1-indexed (player-facing numbering), unlike the
 // 0-indexed values held internally.
 std::wstring FormatTuning(const std::map<std::string, int>& tuning) {
@@ -45,21 +90,44 @@ std::wstring FormatTuning(const std::map<std::string, int>& tuning) {
 }  // namespace
 
 std::vector<RaceCar> ReadRaceCars(uintptr_t tableBase) {
+    using Clock = std::chrono::steady_clock;
     std::vector<RaceCar> cars;
     if (tableBase == 0) return cars;
-    for (const auto& [name, obj] : RegistryEntriesMatching(tableBase, "vehicle/", "/assembly.veas")) {
+    auto start = Clock::now();
+    auto entries = RegistryEntriesMatching(tableBase, "vehicle/", "/assembly.veas");
+    auto scanned = Clock::now();
+    Clock::duration namesTime{};
+    auto lookupName = [&](const std::string& path) {
+        auto t = Clock::now();
+        auto name = PartDisplayName(tableBase, path);
+        namesTime += Clock::now() - t;
+        return name;
+    };
+    for (const auto& [name, obj] : entries) {
         auto parsed = ParseAssemblyName(name);
         if (!parsed) continue;
-        RaceCar car{name, parsed->slot, parsed->codename, parsed->ai, {}};
+        RaceCar car{name, parsed->slot, parsed->codename, parsed->ai, {}, {}};
         // AI cars are mostly built from AI-only part files with no presets
-        // (typically only the gearbox resolves), so their tuning isn't read.
-        if (!car.ai) car.tuning = TuningFromPartPaths(ReadAssemblyPaths(obj), car.codename);
+        // (typically only the gearbox resolves), so their tuning isn't read;
+        // their parts aren't either, to keep the payload small.
+        if (!car.ai) {
+            auto paths = ReadAssemblyPaths(obj);
+            car.tuning = TuningFromPartPaths(paths, car.codename);
+            car.parts = PartsFromPartPaths(paths, car.codename, lookupName);
+        }
         DebugLog((L"tuning: race car slot " + std::to_wstring(car.slot) + L" '" + WidenAscii(name) + L"' -> " +
                   (car.ai ? L"AI, tuning not read" : FormatTuning(car.tuning)))
                      .c_str());
+        if (!car.ai) {
+            DebugLog((L"parts: race car slot " + std::to_wstring(car.slot) + L" -> " + FormatParts(car.parts)).c_str());
+        }
         cars.push_back(std::move(car));
     }
-    DebugLog((L"tuning: " + std::to_wstring(cars.size()) + L" race car assemblies found").c_str());
+    auto ms = [](Clock::duration d) { return std::to_wstring(std::chrono::duration<double, std::milli>(d).count()); };
+    DebugLog((L"tuning: " + std::to_wstring(cars.size()) + L" race car assemblies found -- registry scan " +
+              ms(scanned - start) + L" ms, assemblies " + ms(Clock::now() - scanned) + L" ms (part names " +
+              ms(namesTime) + L" ms)")
+                 .c_str());
     return cars;
 }
 
@@ -76,6 +144,7 @@ void AssignRaceCars(std::vector<PlayerResult>& players, const std::vector<RaceCa
         }
         if (matches == 1) {
             p.ai = match->ai;
+            p.parts = match->parts;                     // empty for an AI car
             if (!p.is_local) p.tuning = match->tuning;  // empty for an AI car
         } else if (matches > 1) {
             DebugLog((L"tuning: slot " + std::to_wstring(*p.slot_index) + L" has " + std::to_wstring(matches) +

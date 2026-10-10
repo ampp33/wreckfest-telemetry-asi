@@ -11,6 +11,7 @@
 #include "lz4.h"
 #include "strings/Utf8.h"
 #include "tuning/AssemblyTuning.h"
+#include "tuning/CarParts.h"
 #include "tuning/Lz4Block.h"
 #include "tuning/SaveFileTuning.h"
 #include "tuning/TuningDisplay.h"
@@ -184,6 +185,78 @@ void TestMergeTuning() {
     Check(expected["BRAKES"] == 0, "ToDisplayTuning: input left untouched");
 }
 
+void TestEngineTier() {
+    using wreckfest_telemetry::EngineTier;
+    Check(EngineTier("engine_block_c") == "street", "EngineTier: engine_block_c is street");
+    Check(EngineTier("engine_block_b") == "sport", "EngineTier: engine_block_b is sport");
+    Check(EngineTier("engine_block_a") == "race", "EngineTier: engine_block_a is race");
+    Check(EngineTier("b_class(327)") == "sport", "EngineTier: native b-class engine is sport");
+    Check(EngineTier("c_class(gt-r)") == "street", "EngineTier: native engine with a non-numeric suffix");
+    Check(EngineTier("c_class") == "street", "EngineTier: bare native engine");
+    Check(EngineTier("a_class(455)") == "race", "EngineTier: native a-class engine is race");
+    Check(!EngineTier("bigrig"), "EngineTier: special engine unrecognised");
+    Check(!EngineTier("engine_block_x"), "EngineTier: unknown class letter");
+    Check(!EngineTier("c_classic"), "EngineTier: not a class name");
+}
+
+void TestPartsFromPartPaths() {
+    using wreckfest_telemetry::PartsFromPartPaths;
+
+    // Excerpt of a live RoadSlayer assembly (garage, 2026-10-08).
+    std::vector<std::string> paths = {
+        "vehicle/00/06_american_01_761324816/data/vehicle/06_american_01/part/chassis.vecs",
+        "vehicle/00/06_american_01_761324816/data/vehicle/06_american_01/part/engine/b_class/engine_block_c.veen",
+        "data/vehicle/06_american_01/part/engine/b_class/air_filter/racing.vefi",
+        "data/vehicle/06_american_01/part/engine/b_class/pistons/sport.veps",
+        "data/vehicle/06_american_01/part/engine/b_class/turbo/turbo.veaf",
+        "data/vehicle/06_american_01/part/gearbox/std.vege",
+        "data/vehicle/06_american_01/part/bumper_front/bumper_front3.vfbu",
+        "data/vehicle/06_american_01/part/side_protector/dlc_side_protector03.vpsp",
+        "data/vehicle/06_american_01/part/hood/hood0.vhod",
+        "data/vehicle/04_european/part/bumper_rear/bumper_rear2.vrbu",
+    };
+    std::vector<std::string> looked;
+    auto parts = PartsFromPartPaths(paths, "06_american_01", [&](const std::string& path) {
+        looked.push_back(path);
+        return path.find("bumper_front3") != std::string::npos ? std::optional<std::string>("Mesh Guard")
+                                                              : std::nullopt;
+    });
+    Check(parts.engine == "street", "PartsFromPartPaths: engine tier from instance-prefixed path");
+    Check(parts.engine_parts == std::map<std::string, std::string>{{"air_filter", "racing"}, {"pistons", "sport"}},
+          "PartsFromPartPaths: engine sub-parts raw, turbo/tuning ignored");
+    Check(parts.armor.size() == 2, "PartsFromPartPaths: armor only, another car's path ignored");
+    Check(parts.armor["front_bumper"].code == "bumper_front3" && parts.armor["front_bumper"].name == "Mesh Guard",
+          "PartsFromPartPaths: armor code + name");
+    Check(parts.armor["side_protector"].code == "dlc_side_protector03" && !parts.armor["side_protector"].name,
+          "PartsFromPartPaths: DLC armor, unresolved name");
+    Check(looked.size() == 2, "PartsFromPartPaths: names looked up for armor only");
+
+    // School bus (no armor options): armor slots point at shared parts.
+    auto bus = PartsFromPartPaths({"data/vehicle/schoolbus_loaner/part/engine/c_class/c_class.veen",
+                                   "data/vehicle/shared/part/roll_cage/stock.vrol",
+                                   "data/vehicle/shared/part/window_bar/none.vewb"},
+                                  "schoolbus_loaner", nullptr);
+    Check(bus.engine == "street" && bus.armor["roll_cage"].code == "stock" && bus.armor["window_bars"].code == "none",
+          "PartsFromPartPaths: shared armor parts count");
+
+    auto special = PartsFromPartPaths({"data/vehicle/bigrig/part/engine/bigrig/bigrig.veen"}, "bigrig", nullptr);
+    Check(special.engine == "bigrig", "PartsFromPartPaths: unrecognised engine kept as its raw stem");
+    Check(PartsFromPartPaths({}, "bigrig", nullptr).empty(), "PartsFromPartPaths: no paths, empty parts");
+}
+
+void TestPartsToJson() {
+    wreckfest_telemetry::CarParts parts;
+    parts.engine = "sport";
+    parts.engine_parts = {{"ignition", "racing"}};
+    parts.armor["roll_cage"] = {"roll_cage2", std::string("Driver Cage")};
+    parts.armor["window_bars"] = {"window_bar0", std::nullopt};
+    auto j = wreckfest_telemetry::PartsToJson(parts);
+    Check(j.dump() ==
+              R"({"armor":{"roll_cage":{"code":"roll_cage2","name":"Driver Cage"},"window_bars":{"code":"window_bar0","name":null}},"engine":"sport","engine_parts":{"ignition":"racing"}})",
+          "PartsToJson: shape, unresolved name as null");
+    Check(wreckfest_telemetry::PartsToJson({}).empty(), "PartsToJson: empty parts, empty object");
+}
+
 }  // namespace
 
 int main() {
@@ -197,6 +270,9 @@ int main() {
     TestTuningFromPartPaths();
     TestSanitizeUtf8();
     TestMergeTuning();
+    TestEngineTier();
+    TestPartsFromPartPaths();
+    TestPartsToJson();
 
     if (g_failures == 0) {
         std::printf("all tests passed\n");
