@@ -115,11 +115,13 @@ std::optional<nlohmann::json> BuildApiPayload(const RaceResult& race) {
         {"total_time_ms", local->total_time_ms},
     };
 
-    // Parts go out only inside results_roster entries (stored verbatim):
-    // every top-level field must match a parameter of the backend's RPC, so
-    // a top-level "parts" would get the whole race rejected until the
-    // backend adds one.
     if (auto tuning = TuningToApiFields(race.tuning)) payload.update(*tuning);
+
+    // The local player's parts, also inside their results_roster entry --
+    // duplicated so the backend can store them in their own column. Every
+    // top-level field must match a parameter of the backend's RPC, so this
+    // needs the "parts" parameter deployed first or the race is rejected.
+    if (!local->parts.empty()) payload["parts"] = PartsToJson(local->parts);
 
     if (race.lap_count) payload["lap_count"] = race.lap_count;
     if (!local->lap_times_ms.empty()) payload["lap_times_ms"] = local->lap_times_ms;

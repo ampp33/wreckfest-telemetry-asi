@@ -37,7 +37,9 @@ bool AppendRaceLog(const RaceResult& race, const std::wstring& logPath, bool opp
 // entirely, not sent as a null/empty placeholder. Driving-assist settings
 // (shifting/abs/traction_control/stability_control), when resolved, are
 // sent as a single nested "assists" object rather than flattened top-level
-// keys like the tuning categories.
+// keys like the tuning categories. The local player's car parts, when any
+// resolved, go out as a top-level "parts" object (PartsToJson's shape) as
+// well as in their results_roster entry.
 std::optional<nlohmann::json> BuildApiPayload(const RaceResult& race);
 
 }  // namespace wreckfest_telemetry
