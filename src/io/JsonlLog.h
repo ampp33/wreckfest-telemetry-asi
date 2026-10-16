@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <map>
 #include <optional>
 #include <string>
@@ -30,6 +31,18 @@ nlohmann::json RaceToDict(const RaceResult& race, bool opponentLaps = false);
 // leaves the file untouched) on any I/O failure rather than throwing.
 bool AppendRaceLog(const RaceResult& race, const std::wstring& logPath, bool opponentLaps = false);
 
+// race_log.jsonl keeps the most recent kRaceLogMaxLines races. Once it
+// grows past kRaceLogMaxLines + kRaceLogTrimSlack, the oldest are dropped
+// (see TrimToLastLines in io/LogTrim.h).
+inline constexpr size_t kRaceLogMaxLines = 1000;
+inline constexpr size_t kRaceLogTrimSlack = 100;
+
+// Trims the log per the limits above, rewriting it atomically (see
+// AtomicWriteFile). Returns the number of races dropped -- 0 if it was
+// under the limit -- or -1 if the file couldn't be read or replaced (left
+// untouched; the next race retries).
+int TrimRaceLog(const std::wstring& logPath);
+
 // The API POST body. nullopt if no local player was identified (caller
 // skips posting). Tuning categories are 0-4 internally, sent 1-5 (as are the values in
 // the JSONL log -- see ToDisplayTuning in tuning/TuningDisplay.h); a
@@ -37,7 +50,9 @@ bool AppendRaceLog(const RaceResult& race, const std::wstring& logPath, bool opp
 // entirely, not sent as a null/empty placeholder. Driving-assist settings
 // (shifting/abs/traction_control/stability_control), when resolved, are
 // sent as a single nested "assists" object rather than flattened top-level
-// keys like the tuning categories.
+// keys like the tuning categories. The local player's car parts, when any
+// resolved, go out as a top-level "parts" object (PartsToJson's shape) as
+// well as in their results_roster entry.
 std::optional<nlohmann::json> BuildApiPayload(const RaceResult& race);
 
 }  // namespace wreckfest_telemetry

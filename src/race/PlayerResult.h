@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "memory/Offsets.h"
+#include "tuning/CarParts.h"
 
 namespace wreckfest_telemetry {
 
@@ -30,6 +31,9 @@ struct PlayerResult {
     // with ToDisplayTuning before output). Only the categories that
     // resolved; empty if none did.
     std::map<std::string, int> tuning;
+    // Engine/armor upgrades of the car this player raced, from the same
+    // assembly as `tuning`. Empty for AI players and unmatched cars.
+    CarParts parts;
     // Whether this racer is an AI bot, from their race car's registry
     // assembly (AI cars carry an "_ai" codename). nullopt if their car
     // couldn't be matched to their slot -- left out of the output rather
