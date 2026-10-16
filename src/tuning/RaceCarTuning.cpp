@@ -1,6 +1,7 @@
 #include "tuning/RaceCarTuning.h"
 
 #include <chrono>
+#include <cmath>
 
 #include "debug/DebugLog.h"
 #include "memory/ProcessMemory.h"
@@ -36,32 +37,58 @@ std::vector<std::string> ReadAssemblyPaths(uintptr_t assembly) {
 // A part object (resolved by its path through the registry) is a list of
 // properties, each a pointer to its "VEHICLE_UPGRADE_<FIELD>_<id>" loc key,
 // then the localized value 0x10 later and the bare field name 0x18 later.
-// The name, when present, has been the first such property (seen at +0x58
-// on armor/engine parts). Scanning stops at the first upgrade property so a
-// nameless part can't pick up the next object's name.
+// The name, when present, has been the first such property -- usually at
+// +0x58, but parts with extra leading properties (chain attachments etc.)
+// push it as deep as +0x3338 (e.g. 05_american window_bar1). Scanning stops
+// at the first upgrade property so a nameless part can't pick up the next
+// object's name. A sweep of all 2178 armor parts loaded in the garage
+// (2026-10-10) resolved every name with this bound; 0x200 missed 51.
 constexpr uintptr_t kPartPropScanStart = 0x40;
-constexpr uintptr_t kPartPropScanEnd = 0x200;
+constexpr uintptr_t kPartPropScanEnd = 0x4000;
+
+// A part object's first field points to a record holding the part's
+// weight in kg as a float at +0x100 -- what it adds to the car (0 for the
+// "None" options). Verified live 2026-10-10 against the upgrades screen
+// (e.g. Combat Crusher 120, Marauder Rammer 100) and a 100 kg drop in
+// career-carstats-temp weight on removing the Marauder Rammer.
+constexpr uintptr_t kPartWeightOff = 0x100;
+constexpr float kPartMaxWeightKg = 2000.0f;
 
 bool StartsWith(const std::string& s, const char* prefix) { return s.rfind(prefix, 0) == 0; }
 
-std::optional<std::string> PartDisplayName(uintptr_t tableBase, const std::string& path) {
-    auto obj = HashRegistryLookup(tableBase, path);
-    if (!obj || *obj == 0) return std::nullopt;
+std::optional<std::string> PartDisplayName(uintptr_t obj) {
     for (uintptr_t off = kPartPropScanStart; off < kPartPropScanEnd; off += 8) {
-        auto keyPtr = ReadU64(*obj + off);
+        auto keyPtr = ReadU64(obj + off);
         if (!keyPtr || *keyPtr < 0x10000) continue;
         auto key = ReadCString(static_cast<uintptr_t>(*keyPtr), 64);
         if (!key || !StartsWith(*key, "VEHICLE_UPGRADE_")) continue;
         if (!StartsWith(*key, "VEHICLE_UPGRADE_NAME_")) return std::nullopt;
-        auto fieldPtr = ReadU64(*obj + off + 0x18);
+        auto fieldPtr = ReadU64(obj + off + 0x18);
         auto field = fieldPtr ? ReadCString(static_cast<uintptr_t>(*fieldPtr), 32) : std::nullopt;
         if (!field || *field != "VEHICLE_UPGRADE_NAME") return std::nullopt;
-        auto valuePtr = ReadU64(*obj + off + 0x10);
+        auto valuePtr = ReadU64(obj + off + 0x10);
         auto value = valuePtr && *valuePtr >= 0x10000 ? ReadCString(static_cast<uintptr_t>(*valuePtr), 64) : std::nullopt;
         if (!value || value->empty()) return std::nullopt;
         return value;
     }
     return std::nullopt;
+}
+
+std::optional<int> PartWeightKg(uintptr_t obj) {
+    auto record = ReadU64(obj);
+    if (!record || *record < 0x10000) return std::nullopt;
+    auto weight = ReadF32(static_cast<uintptr_t>(*record) + kPartWeightOff);
+    if (!weight || !std::isfinite(*weight) || *weight < 0.0f || *weight > kPartMaxWeightKg) return std::nullopt;
+    return static_cast<int>(std::lround(*weight));
+}
+
+ArmorPart ArmorDetails(uintptr_t tableBase, const std::string& path) {
+    ArmorPart part;
+    auto obj = HashRegistryLookup(tableBase, path);
+    if (!obj || *obj == 0) return part;
+    part.name = PartDisplayName(static_cast<uintptr_t>(*obj));
+    part.weight_kg = PartWeightKg(static_cast<uintptr_t>(*obj));
+    return part;
 }
 
 std::wstring FormatParts(const CarParts& parts) {
@@ -71,7 +98,8 @@ std::wstring FormatParts(const CarParts& parts) {
     for (const auto& [slot, part] : parts.armor) {
         // Names can be non-ASCII in other game languages -- logged as a
         // resolved/unresolved marker only, to keep the wide log stream safe.
-        out += L" " + WidenAscii(slot) + L"=" + WidenAscii(part.code) + (part.name ? L"(named)" : L"(no name)");
+        out += L" " + WidenAscii(slot) + L"=" + WidenAscii(part.code) + (part.name ? L"(named, " : L"(no name, ") +
+               (part.weight_kg ? std::to_wstring(*part.weight_kg) + L" kg)" : L"? kg)");
     }
     return out;
 }
@@ -96,12 +124,12 @@ std::vector<RaceCar> ReadRaceCars(uintptr_t tableBase) {
     auto start = Clock::now();
     auto entries = RegistryEntriesMatching(tableBase, "vehicle/", "/assembly.veas");
     auto scanned = Clock::now();
-    Clock::duration namesTime{};
-    auto lookupName = [&](const std::string& path) {
+    Clock::duration armorTime{};
+    auto lookupArmor = [&](const std::string& path) {
         auto t = Clock::now();
-        auto name = PartDisplayName(tableBase, path);
-        namesTime += Clock::now() - t;
-        return name;
+        auto part = ArmorDetails(tableBase, path);
+        armorTime += Clock::now() - t;
+        return part;
     };
     for (const auto& [name, obj] : entries) {
         auto parsed = ParseAssemblyName(name);
@@ -113,7 +141,7 @@ std::vector<RaceCar> ReadRaceCars(uintptr_t tableBase) {
         if (!car.ai) {
             auto paths = ReadAssemblyPaths(obj);
             car.tuning = TuningFromPartPaths(paths, car.codename);
-            car.parts = PartsFromPartPaths(paths, car.codename, lookupName);
+            car.parts = PartsFromPartPaths(paths, car.codename, lookupArmor);
         }
         DebugLog((L"tuning: race car slot " + std::to_wstring(car.slot) + L" '" + WidenAscii(name) + L"' -> " +
                   (car.ai ? L"AI, tuning not read" : FormatTuning(car.tuning)))
@@ -125,8 +153,8 @@ std::vector<RaceCar> ReadRaceCars(uintptr_t tableBase) {
     }
     auto ms = [](Clock::duration d) { return std::to_wstring(std::chrono::duration<double, std::milli>(d).count()); };
     DebugLog((L"tuning: " + std::to_wstring(cars.size()) + L" race car assemblies found -- registry scan " +
-              ms(scanned - start) + L" ms, assemblies " + ms(Clock::now() - scanned) + L" ms (part names " +
-              ms(namesTime) + L" ms)")
+              ms(scanned - start) + L" ms, assemblies " + ms(Clock::now() - scanned) + L" ms (armor details " +
+              ms(armorTime) + L" ms)")
                  .c_str());
     return cars;
 }

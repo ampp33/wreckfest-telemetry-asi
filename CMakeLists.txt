@@ -52,6 +52,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
         src/io/JsonlLog.cpp
         src/io/Config.cpp
         src/io/Queue.cpp
+        src/io/AtomicFile.cpp
+        src/io/LogTrim.cpp
         src/net/HttpClient.cpp
         src/net/SupabaseClient.cpp
         ${DEPS_DIR}/lz4.c

@@ -7,6 +7,7 @@
 #include <sstream>
 
 #include "debug/DebugLog.h"
+#include "io/AtomicFile.h"
 #include "net/SupabaseClient.h"
 
 namespace wreckfest_telemetry {
@@ -19,22 +20,6 @@ std::string NowTimestamp() {
     std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &tmVal);
     return buf;
 }
-
-namespace {
-
-bool AtomicWriteFile(const std::wstring& path, const std::string& content) {
-    std::wstring tmp = path + L".tmp";
-    HANDLE h = CreateFileW(tmp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (h == INVALID_HANDLE_VALUE) return false;
-    DWORD written = 0;
-    BOOL ok = WriteFile(h, content.data(), static_cast<DWORD>(content.size()), &written, nullptr);
-    if (ok) FlushFileBuffers(h);
-    CloseHandle(h);
-    if (!ok || written != content.size()) return false;
-    return MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING) != 0;
-}
-
-}  // namespace
 
 std::vector<QueueEntry> ReadQueue(const std::wstring& path) {
     std::vector<QueueEntry> entries;

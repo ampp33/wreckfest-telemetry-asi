@@ -3,8 +3,11 @@
 #include <algorithm>
 #include <cstdio>
 #include <fstream>
+#include <iterator>
 
 #include "PluginVersion.h"
+#include "io/AtomicFile.h"
+#include "io/LogTrim.h"
 #include "strings/Utf8.h"
 #include "tuning/CarParts.h"
 #include "tuning/TuningDisplay.h"
@@ -151,6 +154,20 @@ bool AppendRaceLog(const RaceResult& race, const std::wstring& logPath, bool opp
     if (!out) return false;
     out << RaceToDict(race, opponentLaps).dump() << "\n";
     return static_cast<bool>(out);
+}
+
+int TrimRaceLog(const std::wstring& logPath) {
+    std::string content;
+    {
+        std::ifstream in(logPath.c_str(), std::ios::binary);
+        if (!in) return -1;
+        content.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+        if (in.bad()) return -1;
+    }
+    auto trimmed = TrimToLastLines(content, kRaceLogMaxLines, kRaceLogTrimSlack);
+    if (!trimmed) return 0;
+    if (!AtomicWriteFile(logPath, *trimmed)) return -1;
+    return static_cast<int>(std::count(content.begin(), content.end() - trimmed->size(), '\n'));
 }
 
 }  // namespace wreckfest_telemetry

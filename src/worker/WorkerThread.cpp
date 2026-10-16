@@ -97,6 +97,14 @@ void EmitRace(const RaceResult& race, const std::wstring& logPath, const ApiConf
     DebugLog((L"race logged: " + WidenAscii(race.track) + L" (" +
               WidenAscii(logged ? "ok" : "FAILED TO WRITE LOG FILE") + L")")
                  .c_str());
+    if (logged) {
+        int dropped = TrimRaceLog(logPath);
+        if (dropped > 0) {
+            DebugLog((L"race log trimmed: dropped the oldest " + std::to_wstring(dropped) + L" races").c_str());
+        } else if (dropped < 0) {
+            DebugLog(L"race log trim FAILED (file unreadable or locked) -- will retry after the next race");
+        }
+    }
     if (!allowApi) {
         DebugLog(L"API post skipped: local player identity unconfirmed this race");
         return;

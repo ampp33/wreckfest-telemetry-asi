@@ -59,7 +59,7 @@ std::optional<std::string> EngineTier(const std::string& stem) {
 }
 
 CarParts PartsFromPartPaths(const std::vector<std::string>& paths, const std::string& codename,
-                            const std::function<std::optional<std::string>(const std::string&)>& lookupName) {
+                            const ArmorLookup& lookupArmor) {
     CarParts parts;
     // Some entries carry a per-spawn "vehicle/NN/<codename>_<id>/" prefix
     // ahead of "data/...", so match the directory anywhere in the path.
@@ -84,7 +84,9 @@ CarParts PartsFromPartPaths(const std::vector<std::string>& paths, const std::st
                 break;
             case SlotKind::Armor:
                 if (!parts.armor.count(slot->key)) {
-                    parts.armor[slot->key] = ArmorPart{stem, lookupName ? lookupName(path) : std::nullopt};
+                    ArmorPart part = lookupArmor ? lookupArmor(path) : ArmorPart{};
+                    part.code = stem;
+                    parts.armor[slot->key] = std::move(part);
                 }
                 break;
         }
@@ -103,8 +105,8 @@ nlohmann::json PartsToJson(const CarParts& parts) {
     if (!parts.armor.empty()) {
         nlohmann::json armor = nlohmann::json::object();
         for (const auto& [slot, part] : parts.armor) {
-            armor[slot] = {{"code", SanitizeUtf8(part.code)},
-                           {"name", part.name ? nlohmann::json(SanitizeUtf8(*part.name)) : nlohmann::json(nullptr)}};
+            armor[slot] = {{"name", part.name ? nlohmann::json(SanitizeUtf8(*part.name)) : nlohmann::json(nullptr)},
+                           {"weight_kg", part.weight_kg ? nlohmann::json(*part.weight_kg) : nlohmann::json(nullptr)}};
         }
         d["armor"] = armor;
     }

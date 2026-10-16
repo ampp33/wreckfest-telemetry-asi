@@ -17,6 +17,7 @@ set(PURE_LOGIC_SOURCES
     ${CMAKE_SOURCE_DIR}/src/tuning/CarParts.cpp
     ${CMAKE_SOURCE_DIR}/src/tuning/TuningDisplay.cpp
     ${CMAKE_SOURCE_DIR}/src/strings/Utf8.cpp
+    ${CMAKE_SOURCE_DIR}/src/io/LogTrim.cpp
     ${DEPS_DIR}/lz4.c
 )
 

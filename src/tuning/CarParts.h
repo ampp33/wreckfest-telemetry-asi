@@ -17,8 +17,9 @@ namespace wreckfest_telemetry {
 // options point their armor slots at "data/vehicle/shared/part/...".
 // Verified live 2026-10-08 against the garage UI and two online races.
 struct ArmorPart {
-    std::string code;                 // file stem, e.g. "bumper_front3", "dlc_side_protector03"
+    std::string code;                 // file stem, e.g. "bumper_front3" -- debug log only, not in the JSON
     std::optional<std::string> name;  // display name in the game's language; nullopt if unresolved
+    std::optional<int> weight_kg;     // what the part adds to the car (0 for "None" parts); nullopt if unresolved
 };
 
 struct CarParts {
@@ -41,15 +42,19 @@ struct CarParts {
 // other options "engine_block_<letter>". nullopt for anything else.
 std::optional<std::string> EngineTier(const std::string& stem);
 
-// Parts from an assembly's part paths. Only paths for `codename` or the
-// shared part directory count; the first path per slot wins. `lookupName`
-// resolves an armor part's display name from its full path (as stored in
-// the assembly); pass nullptr to skip names.
-CarParts PartsFromPartPaths(const std::vector<std::string>& paths, const std::string& codename,
-                            const std::function<std::optional<std::string>(const std::string&)>& lookupName);
+// Resolves an armor part's name and weight_kg from its full path (as stored
+// in the assembly), leaving either nullopt if it can't; `code` is filled in
+// by PartsFromPartPaths.
+using ArmorLookup = std::function<ArmorPart(const std::string& path)>;
 
-// JSON for logs/the API: {"engine", "engine_parts", "armor": {slot: {"code", "name"}}},
-// fields left out when unresolved, an unresolved armor name sent as null.
+// Parts from an assembly's part paths. Only paths for `codename` or the
+// shared part directory count; the first path per slot wins. Pass a null
+// `lookupArmor` to skip armor names/weights.
+CarParts PartsFromPartPaths(const std::vector<std::string>& paths, const std::string& codename,
+                            const ArmorLookup& lookupArmor);
+
+// JSON for logs/the API: {"engine", "engine_parts", "armor": {slot: {"name", "weight_kg"}}},
+// fields left out when unresolved, an unresolved armor name/weight sent as null.
 nlohmann::json PartsToJson(const CarParts& parts);
 
 }  // namespace wreckfest_telemetry
