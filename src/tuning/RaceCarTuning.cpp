@@ -2,6 +2,8 @@
 
 #include <chrono>
 #include <cmath>
+#include <cstdio>
+#include <iterator>
 
 #include "debug/DebugLog.h"
 #include "memory/ProcessMemory.h"
@@ -23,61 +25,99 @@ constexpr uintptr_t kAssemblyEntryStride = 0x20;
 constexpr uintptr_t kAssemblyEntryPathOff = 0x10;
 constexpr int kAssemblyMaxEntries = 64;
 
+std::wstring Hex(uint64_t v) {
+    wchar_t buf[24];
+    std::swprintf(buf, std::size(buf), L"0x%llX", static_cast<unsigned long long>(v));
+    return buf;
+}
+
+// Debug-log rendering of text read from game memory: non-ASCII bytes
+// (localized part names) as \xNN, since a non-ASCII wide char can put the
+// log's wofstream into a failed state and silence the rest of the log.
+std::wstring Escaped(const std::string& s) {
+    std::wstring out;
+    for (unsigned char c : s) {
+        if (c >= 0x20 && c < 0x7F) {
+            out += static_cast<wchar_t>(c);
+        } else {
+            wchar_t buf[8];
+            std::swprintf(buf, std::size(buf), L"\\x%02X", c);
+            out += buf;
+        }
+    }
+    return out;
+}
+
 std::vector<std::string> ReadAssemblyPaths(uintptr_t assembly) {
     std::vector<std::string> paths;
     for (int i = 0; i < kAssemblyMaxEntries; ++i) {
         auto ptr = ReadU64(assembly + i * kAssemblyEntryStride + kAssemblyEntryPathOff);
         if (!ptr || *ptr < 0x10000) continue;
         auto path = ReadCString(static_cast<uintptr_t>(*ptr), 160);
+        DebugLog((L"parts:   entry " + std::to_wstring(i) + L": " +
+                  (path ? L"'" + Escaped(*path) + L"'" : L"(unreadable string at " + Hex(*ptr) + L")"))
+                     .c_str());
         if (path && !path->empty()) paths.push_back(*path);
     }
     return paths;
 }
 
-// A part object (resolved by its path through the registry) is a list of
-// properties, each a pointer to its "VEHICLE_UPGRADE_<FIELD>_<id>" loc key,
-// then the localized value 0x10 later and the bare field name 0x18 later.
-// The name, when present, has been the first such property -- usually at
-// +0x58, but parts with extra leading properties (chain attachments etc.)
-// push it as deep as +0x3338 (e.g. 05_american window_bar1). Scanning stops
-// at the first upgrade property so a nameless part can't pick up the next
-// object's name. A sweep of all 2178 armor parts loaded in the garage
-// (2026-10-10) resolved every name with this bound; 0x200 missed 51.
-constexpr uintptr_t kPartPropScanStart = 0x40;
-constexpr uintptr_t kPartPropScanEnd = 0x4000;
-
-// A part object's first field points to a record holding the part's
-// weight in kg as a float at +0x100 -- what it adds to the car (0 for the
-// "None" options). Verified live 2026-10-10 against the upgrades screen
-// (e.g. Combat Crusher 120, Marauder Rammer 100) and a 100 kg drop in
-// career-carstats-temp weight on removing the Marauder Rammer.
+// An armor part's registry object (looked up by its path) is only 0x40
+// bytes; its first field points to the part's record. The record holds
+// pointers to the part's own properties -- the name property at +0x10 --
+// and the part's weight in kg as a float at +0x100: what it adds to the car
+// (0 for the "None" options). Each property holds its
+// "VEHICLE_UPGRADE_<FIELD>_<hash>_<len>" loc key at +0x8, the localized
+// value at +0x18 and the bare field name at +0x20.
+//
+// Names used to be found by scanning forward from the object for the first
+// name property, but everything past its 0x40 bytes is unrelated heap, so
+// that picked up neighbouring parts' names wherever the allocator put them
+// (wrong on native Windows, right by luck on Proton). Name link verified
+// live 2026-11-08 (Windows/Epic, Venom: Stock Bumper x2, None x3, Avenger
+// Bars) against the upgrades screen; weight verified 2026-10-10 (Combat
+// Crusher 120, Marauder Rammer 100, a 100 kg carstats drop on removing it).
+constexpr uintptr_t kRecordNamePropOff = 0x10;
+constexpr uintptr_t kPropKeyOff = 0x08;
+constexpr uintptr_t kPropValueOff = 0x18;
+constexpr uintptr_t kPropFieldOff = 0x20;
 constexpr uintptr_t kPartWeightOff = 0x100;
 constexpr float kPartMaxWeightKg = 2000.0f;
 
 bool StartsWith(const std::string& s, const char* prefix) { return s.rfind(prefix, 0) == 0; }
 
-std::optional<std::string> PartDisplayName(uintptr_t obj) {
-    for (uintptr_t off = kPartPropScanStart; off < kPartPropScanEnd; off += 8) {
-        auto keyPtr = ReadU64(obj + off);
-        if (!keyPtr || *keyPtr < 0x10000) continue;
-        auto key = ReadCString(static_cast<uintptr_t>(*keyPtr), 64);
-        if (!key || !StartsWith(*key, "VEHICLE_UPGRADE_")) continue;
-        if (!StartsWith(*key, "VEHICLE_UPGRADE_NAME_")) return std::nullopt;
-        auto fieldPtr = ReadU64(obj + off + 0x18);
-        auto field = fieldPtr ? ReadCString(static_cast<uintptr_t>(*fieldPtr), 32) : std::nullopt;
-        if (!field || *field != "VEHICLE_UPGRADE_NAME") return std::nullopt;
-        auto valuePtr = ReadU64(obj + off + 0x10);
-        auto value = valuePtr && *valuePtr >= 0x10000 ? ReadCString(static_cast<uintptr_t>(*valuePtr), 64) : std::nullopt;
-        if (!value || value->empty()) return std::nullopt;
-        return value;
-    }
+std::optional<std::string> ReadStringAt(uintptr_t ptrAddr, size_t maxLen) {
+    auto ptr = ReadU64(ptrAddr);
+    if (!ptr || *ptr < 0x10000) return std::nullopt;
+    return ReadCString(static_cast<uintptr_t>(*ptr), maxLen);
+}
+
+// Logs why PartDisplayName() gave up -- debug log only.
+std::nullopt_t NameFail(const std::wstring& why) {
+    DebugLog((L"armor:     name unresolved: " + why).c_str());
     return std::nullopt;
 }
 
-std::optional<int> PartWeightKg(uintptr_t obj) {
-    auto record = ReadU64(obj);
-    if (!record || *record < 0x10000) return std::nullopt;
-    auto weight = ReadF32(static_cast<uintptr_t>(*record) + kPartWeightOff);
+std::optional<std::string> PartDisplayName(uintptr_t record) {
+    auto prop = ReadU64(record + kRecordNamePropOff);
+    if (!prop || *prop < 0x10000) return NameFail(L"bad name property pointer " + Hex(prop.value_or(0)));
+    auto base = static_cast<uintptr_t>(*prop);
+    auto key = ReadStringAt(base + kPropKeyOff, 64);
+    auto field = ReadStringAt(base + kPropFieldOff, 32);
+    // Both checked, so a layout change reads as unresolved rather than as some other string.
+    if (!key || !StartsWith(*key, "VEHICLE_UPGRADE_NAME_") || !field || *field != "VEHICLE_UPGRADE_NAME") {
+        return NameFail(L"property " + Hex(base) + L" has key " + (key ? L"'" + Escaped(*key) + L"'" : L"?") +
+                        L", field " + (field ? L"'" + Escaped(*field) + L"'" : L"?"));
+    }
+    auto value = ReadStringAt(base + kPropValueOff, 64);
+    if (!value || value->empty()) return NameFail(L"key '" + Escaped(*key) + L"' has no value");
+    DebugLog((L"armor:     name '" + Escaped(*value) + L"' (key '" + Escaped(*key) + L"')").c_str());
+    return value;
+}
+
+std::optional<int> PartWeightKg(uintptr_t record) {
+    auto weight = ReadF32(record + kPartWeightOff);
+    DebugLog((L"armor:     weight raw " + (weight ? std::to_wstring(*weight) : L"unreadable")).c_str());
     if (!weight || !std::isfinite(*weight) || *weight < 0.0f || *weight > kPartMaxWeightKg) return std::nullopt;
     return static_cast<int>(std::lround(*weight));
 }
@@ -85,9 +125,16 @@ std::optional<int> PartWeightKg(uintptr_t obj) {
 ArmorPart ArmorDetails(uintptr_t tableBase, const std::string& path) {
     ArmorPart part;
     auto obj = HashRegistryLookup(tableBase, path);
-    if (!obj || *obj == 0) return part;
-    part.name = PartDisplayName(static_cast<uintptr_t>(*obj));
-    part.weight_kg = PartWeightKg(static_cast<uintptr_t>(*obj));
+    if (!obj || *obj == 0) {
+        DebugLog((L"armor:   '" + Escaped(path) + L"' -> NOT FOUND in registry").c_str());
+        return part;
+    }
+    auto record = ReadU64(static_cast<uintptr_t>(*obj));
+    DebugLog((L"armor:   '" + Escaped(path) + L"' -> object " + Hex(*obj) + L", record " + Hex(record.value_or(0)))
+                 .c_str());
+    if (!record || *record < 0x10000) return part;
+    part.name = PartDisplayName(static_cast<uintptr_t>(*record));
+    part.weight_kg = PartWeightKg(static_cast<uintptr_t>(*record));
     return part;
 }
 
@@ -96,9 +143,8 @@ std::wstring FormatParts(const CarParts& parts) {
     for (const auto& [slot, preset] : parts.engine_parts) out += L" " + WidenAscii(slot) + L"=" + WidenAscii(preset);
     out += L" | armor:";
     for (const auto& [slot, part] : parts.armor) {
-        // Names can be non-ASCII in other game languages -- logged as a
-        // resolved/unresolved marker only, to keep the wide log stream safe.
-        out += L" " + WidenAscii(slot) + L"=" + WidenAscii(part.code) + (part.name ? L"(named, " : L"(no name, ") +
+        out += L" " + WidenAscii(slot) + L"=" + WidenAscii(part.code) +
+               (part.name ? L"('" + Escaped(*part.name) + L"', " : L"(no name, ") +
                (part.weight_kg ? std::to_wstring(*part.weight_kg) + L" kg)" : L"? kg)");
     }
     return out;
@@ -139,6 +185,9 @@ std::vector<RaceCar> ReadRaceCars(uintptr_t tableBase) {
         // (typically only the gearbox resolves), so their tuning isn't read;
         // their parts aren't either, to keep the payload small.
         if (!car.ai) {
+            DebugLog((L"parts: race car slot " + std::to_wstring(car.slot) + L" '" + Escaped(name) + L"' assembly " +
+                      Hex(obj) + L" entries:")
+                         .c_str());
             auto paths = ReadAssemblyPaths(obj);
             car.tuning = TuningFromPartPaths(paths, car.codename);
             car.parts = PartsFromPartPaths(paths, car.codename, lookupArmor);
@@ -171,6 +220,9 @@ void AssignRaceCars(std::vector<PlayerResult>& players, const std::vector<RaceCa
             }
         }
         if (matches == 1) {
+            DebugLog((L"parts: player '" + Escaped(p.name) + L"' slot " + std::to_wstring(*p.slot_index) +
+                      L" -> assembly '" + Escaped(match->name) + L"'")
+                         .c_str());
             p.ai = match->ai;
             p.parts = match->parts;                     // empty for an AI car
             if (!p.is_local) p.tuning = match->tuning;  // empty for an AI car

@@ -181,6 +181,16 @@ std::pair<int, int> ReadRaceSettings(uintptr_t tableBase) {
     return {laps, opps};
 }
 
+EventInfo ReadEventInfo(uintptr_t moduleBase, uintptr_t tableBase) {
+    EventInfo info;
+    if (auto flag = ReadI32(moduleBase + TOURNAMENT_MODE_FLAG_OFF)) info.tournamentMode = *flag != 0;
+    if (tableBase == 0) return info;
+    if (auto obj = HashRegistryLookup(tableBase, "event_settings")) {
+        info.gameMode = ReadI32(*obj + EVENT_SETTINGS_GAME_MODE_OFF);
+    }
+    return info;
+}
+
 std::pair<std::string, std::string> DetectTrackAndVariation(uintptr_t moduleBase, uintptr_t tableBase) {
     if (tableBase == 0) return {"Unknown Track", ""};
 

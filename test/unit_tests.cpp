@@ -5,11 +5,14 @@
 #include <cstdio>
 #include <cstdlib>
 #include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "io/LogTrim.h"
 #include "lz4.h"
+#include "race/GameMode.h"
+#include "race/RaceEmitGate.h"
 #include "strings/Utf8.h"
 #include "tuning/AssemblyTuning.h"
 #include "tuning/CarParts.h"
@@ -276,6 +279,142 @@ void TestTrimToLastLines() {
     Check(TrimToLastLines(lines(1, 3), 0, 0) == "", "TrimToLastLines: zero max drops everything");
 }
 
+// Replays a tick sequence through a fresh gate (emitting on kEmit, as the
+// worker does), returning the decision per tick. nullopt = no players.
+std::vector<wreckfest_telemetry::RaceEmitGate::Decision> RunGate(
+    const std::vector<std::optional<std::pair<std::string, bool>>>& ticks) {
+    wreckfest_telemetry::RaceEmitGate gate;
+    std::vector<wreckfest_telemetry::RaceEmitGate::Decision> out;
+    for (const auto& t : ticks) {
+        if (!t) {
+            gate.ObserveEmpty();
+            out.push_back(wreckfest_telemetry::RaceEmitGate::Decision::kNone);
+            continue;
+        }
+        auto d = gate.Observe(t->first, t->second);
+        if (d == wreckfest_telemetry::RaceEmitGate::Decision::kEmit) gate.MarkEmitted(t->first);
+        out.push_back(d);
+    }
+    return out;
+}
+
+int CountDecisions(const std::vector<wreckfest_telemetry::RaceEmitGate::Decision>& ds,
+                   wreckfest_telemetry::RaceEmitGate::Decision which) {
+    int n = 0;
+    for (auto d : ds) n += d == which ? 1 : 0;
+    return n;
+}
+
+void TestRaceEmitGate() {
+    using Gate = wreckfest_telemetry::RaceEmitGate;
+    using D = Gate::Decision;
+    const std::optional<std::pair<std::string, bool>> none;
+    auto racing = [](const std::string& fp) { return std::optional(std::pair(fp, false)); };
+    auto final = [](const std::string& fp) { return std::optional(std::pair(fp, true)); };
+
+    // Every sequence opens mid-race (as a real session does) so the
+    // first-poll adoption doesn't swallow the race under test.
+    const auto warmup = racing("warmup");
+    auto r = RunGate({warmup, racing("A"), racing("A"), final("A"), final("A"), final("A")});
+    Check(r[3] == D::kEmit, "RaceEmitGate: emits on the first final tick once the fingerprint is stable");
+    Check(CountDecisions(r, D::kEmit) == 1, "RaceEmitGate: emits once while results stay up");
+    Check(CountDecisions(r, D::kDuplicate) == 0, "RaceEmitGate: no duplicate report on a steady results screen");
+
+    r = RunGate({warmup, final("A")});
+    Check(CountDecisions(r, D::kEmit) == 0, "RaceEmitGate: a single final tick isn't stable yet");
+
+    // Bug 1: one tick with no players visible re-armed the old gate.
+    r = RunGate({warmup, final("A"), final("A"), none, final("A"), final("A"), final("A")});
+    Check(CountDecisions(r, D::kEmit) == 1, "RaceEmitGate: empty-tick flicker doesn't re-emit");
+    Check(r[5] == D::kDuplicate, "RaceEmitGate: empty-tick flicker reported once as a duplicate");
+    Check(CountDecisions(r, D::kDuplicate) == 1, "RaceEmitGate: duplicate reported only once per run");
+
+    // Bug 2: a different fingerprint in between (e.g. local player not
+    // identified for a tick) overwrote the old gate's single memory.
+    r = RunGate({warmup, final("A"), final("A"), final("B"), final("B"), final("A"), final("A")});
+    Check(r[4] == D::kEmit, "RaceEmitGate: the flipped-to fingerprint is still its own emit");
+    Check(r[6] == D::kDuplicate, "RaceEmitGate: flipping back to A doesn't re-emit A");
+    Check(CountDecisions(r, D::kEmit) == 2, "RaceEmitGate: A and B each emitted once");
+
+    // Back-and-forth over minutes in the lobby (A, gap, A, gap, ...).
+    r = RunGate({warmup, final("A"), final("A"), none, final("A"), final("A"), none, none, final("A"), final("A")});
+    Check(CountDecisions(r, D::kEmit) == 1, "RaceEmitGate: repeated flickers never re-emit");
+
+    // Consecutive real races still each get logged.
+    r = RunGate({warmup, final("A"), final("A"), none, racing("B"), racing("B"), final("C"), final("C"), none,
+                 final("D"), final("D")});
+    Check(CountDecisions(r, D::kEmit) == 3, "RaceEmitGate: back-to-back races all emitted");
+    Check(CountDecisions(r, D::kDuplicate) == 0, "RaceEmitGate: back-to-back races aren't duplicates");
+
+    // Attaching on a results screen adopts that race instead of emitting it.
+    r = RunGate({final("A"), final("A"), final("A")});
+    Check(CountDecisions(r, D::kEmit) == 0, "RaceEmitGate: race final at attach is adopted, not emitted");
+
+    // A solo race's racer first appears already final; empty menu ticks
+    // before it mean the plugin watched it, so it's emitted.
+    r = RunGate({none, final("A"), final("A")});
+    Check(r[2] == D::kEmit, "RaceEmitGate: first race of a session after empty ticks is emitted");
+
+    // Gap kind feeds the debug log line.
+    Gate gate;
+    gate.Observe("warmup", false);
+    gate.Observe("A", true);
+    gate.Observe("A", true);
+    gate.MarkEmitted("A");
+    gate.ObserveEmpty();
+    gate.Observe("A", true);
+    Check(gate.Observe("A", true) == D::kDuplicate && gate.LastGapWasEmpty(),
+          "RaceEmitGate: gap after empty ticks reported as empty");
+    gate.Observe("B", false);
+    gate.Observe("A", true);
+    Check(gate.Observe("A", true) == D::kDuplicate && !gate.LastGapWasEmpty(),
+          "RaceEmitGate: gap after a different fingerprint reported as non-empty");
+
+    // Memory is bounded: the oldest fingerprint ages out.
+    Gate bounded;
+    bounded.Observe("warmup", false);
+    for (std::size_t i = 0; i <= Gate::kMaxRemembered; ++i) bounded.MarkEmitted("fp" + std::to_string(i));
+    bounded.Observe("fp0", true);
+    Check(bounded.Observe("fp0", true) == D::kEmit, "RaceEmitGate: oldest remembered fingerprint ages out");
+    bounded.ObserveEmpty();
+    bounded.Observe("fp1", true);
+    Check(bounded.Observe("fp1", true) == D::kDuplicate, "RaceEmitGate: newer fingerprints still remembered");
+}
+
+wreckfest_telemetry::PlayerResult Racer(int position, int lapsCompleted) {
+    wreckfest_telemetry::PlayerResult p;
+    p.position = position;
+    p.laps_completed = lapsCompleted;
+    return p;
+}
+
+void TestGameMode() {
+    using namespace wreckfest_telemetry;
+    // Values captured live 2026-11-05 on each event's results screen.
+    Check(!SkipReason(EventInfo{1, false}), "SkipReason: race is logged");
+    Check(!SkipReason(EventInfo{8, false}), "SkipReason: team race is logged");
+    Check(!SkipReason(EventInfo{9, false}), "SkipReason: elimination race is logged");
+    Check(SkipReason(EventInfo{4, false}).has_value(), "SkipReason: derby is skipped");
+    for (int mode : {0, 2, 3, 5, 6, 7, 10, 11, 12, 13, 99}) {
+        Check(SkipReason(EventInfo{mode, false}).has_value(), "SkipReason: every other mode is skipped");
+    }
+    Check(SkipReason(EventInfo{1, true}).has_value(), "SkipReason: tournament race is skipped");
+    Check(SkipReason(EventInfo{5, true}).has_value(), "SkipReason: tournament derby is skipped");
+    Check(SkipReason(EventInfo{std::nullopt, false}).has_value(), "SkipReason: unreadable mode is skipped");
+    Check(SkipReason(EventInfo{1, std::nullopt}).has_value(), "SkipReason: unreadable tournament flag is skipped");
+
+    Check(LoggedGameModeName(1) == "race" && LoggedGameModeName(8) == "team_race" &&
+              LoggedGameModeName(9) == "elimination",
+          "LoggedGameModeName: names of the logged modes");
+    Check(!LoggedGameModeName(4), "LoggedGameModeName: none for a skipped mode");
+
+    // Every-lap elimination observed live: winner on 3 laps, others out
+    // after 2, 1 and 0. Players arrive unsorted.
+    Check(EliminationLapCount({Racer(3, 1), Racer(1, 3), Racer(2, 2), Racer(4, 0)}) == 3,
+          "EliminationLapCount: the winner's completed laps");
+    Check(EliminationLapCount({Racer(2, 1), Racer(3, 0)}) == 0, "EliminationLapCount: 0 with no winner");
+}
+
 }  // namespace
 
 int main() {
@@ -293,6 +432,8 @@ int main() {
     TestPartsFromPartPaths();
     TestPartsToJson();
     TestTrimToLastLines();
+    TestRaceEmitGate();
+    TestGameMode();
 
     if (g_failures == 0) {
         std::printf("all tests passed\n");

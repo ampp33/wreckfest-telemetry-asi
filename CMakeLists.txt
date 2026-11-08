@@ -49,6 +49,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
         src/tuning/TuningMerge.cpp
         src/tuning/TuningDisplay.cpp
         src/race/RaceFinality.cpp
+        src/race/RaceEmitGate.cpp
+        src/race/GameMode.cpp
         src/io/JsonlLog.cpp
         src/io/Config.cpp
         src/io/Queue.cpp

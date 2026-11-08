@@ -71,7 +71,21 @@ constexpr uint64_t EVENT_SETTINGS_TRACK_FIELD_OFF = 0xb0;       // -> "<track>_<
 constexpr uint64_t EVENT_SETTINGS_BASE_TRACK_FIELD_OFF = 0xa0;  // -> "<track>" cstr (no variation)
 constexpr uint64_t EVENT_SETTINGS_LAP_COUNT_OFF = 0x108;
 constexpr uint64_t EVENT_SETTINGS_OPPONENTS_OFF = 0x10c;
+constexpr uint64_t EVENT_SETTINGS_GAME_MODE_OFF = 0x38;  // int32 game-mode enum, see race/GameMode.h
+// Elimination race interval (int32 seconds): 0 = last place eliminated
+// every lap, else every N seconds (the game offers 20/30/45/60/90/120).
+// Verified live 2026-11-05 (0 and 20). Not read -- documented for reference.
+constexpr uint64_t EVENT_SETTINGS_ELIMINATION_INTERVAL_OFF = 0x104;
 constexpr uint64_t ENVIRONMENT_SYS_IDX_OFF = 0x18fbd08;  // module_base + this -> registry idx for track/environment system
+
+// module_base + this -> int32, nonzero while the game is in Tournament
+// Mode. The static behind the engine's own bgTournamentModeGet() (engine
+// interface slot +0xe70 -> 0x1402cdd50: `cmp [0x14185648c], 0; setne al`;
+// the setter at +0xe68 writes it, with 1 on "Enter Tournament Mode").
+// Verified live 2026-11-05: 0 in the main menu and normal/online events,
+// 1 from entering the Tournament menu through a tournament event's
+// results, back to 0 on leaving.
+constexpr uint64_t TOURNAMENT_MODE_FLAG_OFF = 0x185648c;
 
 // Driving-assist difficulty settings. Resolved through the hash registry by
 // a name that is literally the persisted save file's own path

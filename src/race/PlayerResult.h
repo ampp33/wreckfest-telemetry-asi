@@ -63,6 +63,9 @@ struct RaceResult {
     // ServerName.h. Empty for offline races (or unresolved), omitted from
     // output.
     std::string server_name;
+    // "race" / "team_race" / "elimination" -- see LoggedGameModeName in
+    // GameMode.h. Only those modes are ever logged.
+    std::string game_mode;
 };
 
 inline char ClassFromRating(int rating) {

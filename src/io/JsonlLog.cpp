@@ -95,6 +95,7 @@ nlohmann::json RaceToDict(const RaceResult& race, bool opponentLaps) {
     if (!race.assists.empty()) d["assists"] = race.assists;
     if (race.vehicle_weight_kg) d["vehicle_weight_kg"] = race.vehicle_weight_kg;
     if (!race.server_name.empty()) d["server_name"] = SanitizeUtf8(race.server_name);
+    if (!race.game_mode.empty()) d["game_mode"] = race.game_mode;
     d["plugin_version"] = kPluginVersion;
 
     nlohmann::json othersArr = nlohmann::json::array();
@@ -131,6 +132,8 @@ std::optional<nlohmann::json> BuildApiPayload(const RaceResult& race) {
     if (!race.assists.empty()) payload["assists"] = race.assists;
     if (race.vehicle_weight_kg) payload["vehicle_weight_kg"] = race.vehicle_weight_kg;
     if (!race.server_name.empty()) payload["server_name"] = SanitizeUtf8(race.server_name);
+    // Needs the backend RPC's "game_mode" parameter deployed first.
+    if (!race.game_mode.empty()) payload["game_mode"] = race.game_mode;
     payload["plugin_version"] = kPluginVersion;
 
     std::vector<const PlayerResult*> rosterPlayers;

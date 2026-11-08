@@ -18,8 +18,10 @@
 #include "memory/ProcessMemory.h"
 #include "memory/SehGuard.h"
 #include "race/CarNames.h"
+#include "race/GameMode.h"
 #include "race/LapSplits.h"
 #include "race/PlayerScraper.h"
+#include "race/RaceEmitGate.h"
 #include "race/RaceFinality.h"
 #include "strings/AssistSettings.h"
 #include "strings/HashRegistry.h"
@@ -77,9 +79,7 @@ std::string ComputeFingerprint(const std::vector<PlayerResult>& players) {
 struct WorkerLoopState {
     std::optional<std::vector<uintptr_t>> cachedAddrs;
     bool scanNeeded = true;
-    std::optional<std::string> lastFingerprintSeen;
-    std::optional<std::string> lastLoggedFingerprint;
-    bool firstPoll = true;
+    RaceEmitGate emitGate;
     // Once a name is established as local for this session, a race later
     // resolving a DIFFERENT name as local is still logged to file for
     // review, but the API post is skipped -- guards against CLIENT
@@ -184,35 +184,32 @@ void RunOneTick(const PollContext& ctx, WorkerLoopState& state) {
     auto& players = scrape.players;
     if (!players.empty()) {
         std::string fingerprint = ComputeFingerprint(players);
-        bool isStable = state.lastFingerprintSeen && *state.lastFingerprintSeen == fingerprint;
-        bool raceFinal = RaceIsFinal(players, stillRacing);
+        auto decision = state.emitGate.Observe(fingerprint, RaceIsFinal(players, stillRacing));
 
-        // A race already finished when the plugin attached is adopted as
-        // already-logged rather than emitted -- it has no lap splits
-        // (never watched from the start), so emitting it would be a
-        // strictly worse duplicate of whatever's already in the log from
-        // a prior session.
-        //
-        // KNOWN BUG (not yet fixed): firstPoll only clears here, on the
-        // first tick with a visible player -- not on the plugin's actual
-        // first poll -- so this can adopt (silently drop) a race the plugin
-        // watched from the start. A racer only becomes visible once they
-        // have a valid best lap, so in a SOLO 1-LAP race run as the first
-        // race of a game session, the local player first appears at the
-        // finish line, already final. Observed live 2026-09-26 (Bloomfield
-        // Figure 8, solo): never logged; the next race in the same session
-        // logged normally. Multi-lap races and races with other racers
-        // still out on track are unaffected. Carried over from the Python
-        // tool, where attaching mid-session makes this rule necessary; the
-        // ASI loads with the game, so its first poll is always in the
-        // menus. Likely fix: clear firstPoll after the first tick
-        // regardless of whether any players were visible.
-        if (state.firstPoll && raceFinal) {
-            state.lastLoggedFingerprint = fingerprint;
+        if (decision == RaceEmitGate::Decision::kDuplicate) {
+            const PlayerResult* local = FindLocalPlayer(players);
+            DebugLog((L"race skipped: already logged this session (local player '" +
+                      (local ? WidenAscii(local->name) : L"(unidentified)") + L"', reappeared after " +
+                      (state.emitGate.LastGapWasEmpty() ? L"a tick with no players visible"
+                                                         : L"a different result was read") +
+                      L")")
+                         .c_str());
         }
-        state.firstPoll = false;
 
-        if (raceFinal && isStable && (!state.lastLoggedFingerprint || *state.lastLoggedFingerprint != fingerprint)) {
+        // Only racing, team races and elimination races outside Tournament
+        // Mode are logged (see GameMode.h). A skipped event is marked
+        // emitted so it isn't re-checked every tick while its results stay
+        // up -- and can't be logged later from stale results either.
+        EventInfo eventInfo;
+        std::optional<std::string> skipReason;
+        if (decision == RaceEmitGate::Decision::kEmit) {
+            eventInfo = ReadEventInfo(ctx.base, tableBase.value_or(0));
+            skipReason = SkipReason(eventInfo);
+        }
+        if (skipReason) {
+            DebugLog((L"race skipped: " + WidenAscii(*skipReason)).c_str());
+            state.emitGate.MarkEmitted(fingerprint);
+        } else if (decision == RaceEmitGate::Decision::kEmit) {
             if (tableBase) {
                 ResolveCarNames(ctx.base, *tableBase, players);
                 int withCar = 0;
@@ -265,6 +262,14 @@ void RunOneTick(const PollContext& ctx, WorkerLoopState& state) {
             }
 
             RaceResult race;
+            race.game_mode = *LoggedGameModeName(*eventInfo.gameMode);
+            if (*eventInfo.gameMode == kGameModeEliminationRace) {
+                int winnerLaps = EliminationLapCount(players);
+                DebugLog((L"elimination race: lap count " + std::to_wstring(winnerLaps) +
+                          L" (winner's laps) in place of the lap setting " + std::to_wstring(lapCount))
+                             .c_str());
+                if (winnerLaps > 0) lapCount = winnerLaps;
+            }
             race.lap_count = lapCount;
             race.opponent_count = opponentCount;
             race.track = track;
@@ -287,12 +292,10 @@ void RunOneTick(const PollContext& ctx, WorkerLoopState& state) {
 
             EmitRace(race, ctx.logPath, ctx.apiConfig, ctx.queuePath, ctx.deadPath, identityTrusted);
             AttemptQueueFlush(ctx, state);
-            state.lastLoggedFingerprint = fingerprint;
+            state.emitGate.MarkEmitted(fingerprint);
         }
-        state.lastFingerprintSeen = fingerprint;
     } else {
-        state.lastFingerprintSeen.reset();
-        state.lastLoggedFingerprint.reset();
+        state.emitGate.ObserveEmpty();
     }
 
     if (state.queuePending && std::chrono::steady_clock::now() >= state.nextFlushAt) {
