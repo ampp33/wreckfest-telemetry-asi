@@ -27,4 +27,9 @@ struct PostResult {
 // as not retryable -- retrying won't fix it. Never throws.
 PostResult PostPayload(const ApiConfig& config, nlohmann::json payload, double timeoutSeconds = 10.0);
 
+// Tells the backend the game is running (shown as "online now" on the
+// site). Sends nothing but the api_key -- no server or game state -- to
+// config.heartbeat_url (the heartbeat_wf1 RPC).
+PostResult PostHeartbeat(const ApiConfig& config);
+
 }  // namespace wreckfest_telemetry

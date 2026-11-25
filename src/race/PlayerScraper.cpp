@@ -362,6 +362,18 @@ ScrapeResult ScrapePlayers(uintptr_t moduleBase, std::optional<uintptr_t> tableB
         pairs.emplace_back(addr, *player);
     }
 
+    std::optional<int> localSlot = tableBase ? LocalPlayerSlotIndex(*tableBase) : std::nullopt;
+    std::set<std::string> presentNames;
+    for (uintptr_t addr : addrs) {
+        auto occupied = ValidateLocalSlotRelaxed(addr);  // occupancy only: rating + named player_ptr
+        if (!occupied) continue;
+        PlayerResult p = ReadPlayerNativeOnly(*occupied);
+        if (p.name.empty() || !presentNames.insert(p.name).second) continue;
+        p.slot_index = static_cast<int>((addr - slot0) / SLOT_STRIDE);
+        p.is_local = p.slot_index == localSlot;
+        result.present.push_back(std::move(p));
+    }
+
     MarkLocalPlayer(moduleBase, tableBase, pairs, slot0);
     outStillRacing = CountStillRacing(slot0);
 

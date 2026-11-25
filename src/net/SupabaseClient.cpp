@@ -62,4 +62,10 @@ PostResult PostPayload(const ApiConfig& config, nlohmann::json payload, double t
     return {false, true, "network error: unexpected exception"};
 }
 
+PostResult PostHeartbeat(const ApiConfig& config) {
+    ApiConfig hb = config;
+    hb.supabase_url = config.heartbeat_url;
+    return PostPayload(hb, nlohmann::json::object(), 5.0);
+}
+
 }  // namespace wreckfest_telemetry

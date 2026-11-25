@@ -101,6 +101,25 @@ constexpr uint64_t ASSIST_ABS_OFF = 0x04;        // 0=off, 1=half, 2=full
 constexpr uint64_t ASSIST_TCS_OFF = 0x08;        // 0=off, 1=half, 2=full
 constexpr uint64_t ASSIST_STABILITY_OFF = 0x0c;  // 0=off, 1=half, 2=full
 
+// Every racer's assists, online included: each other player's settings
+// arrive as an "assists-<N>" object with the same layout as above (N is not
+// the car slot). Reached per car through a static array of the race's
+// simulation objects (filled by the ctor at 0x140305040's callers):
+//   sim     = [module + RACE_SIM_ARRAY_OFF + i*8], i < RACE_SIM_ARRAY_LEN
+//   record  = [sim + SIM_PLAYER_RECORD_OFF]
+//   int32 [record + RECORD_ASSEMBLY_IDX_OFF] = registry index of the car's
+//            "vehicle/NN/<car>/assembly.veas" -- the slot comes from NN,
+//            array position isn't the slot
+//   [record + RECORD_ASSISTS_OFF] = that racer's assists object
+// Verified live 2026-11-08 (Proton/Steam, online, 2 humans + 2 AI) on the
+// grid and on the results screen, each human's values matching what they
+// set in-game.
+constexpr uint64_t RACE_SIM_ARRAY_OFF = 0x183c2c8;
+constexpr int RACE_SIM_ARRAY_LEN = 24;
+constexpr uint64_t SIM_PLAYER_RECORD_OFF = 0xb38;
+constexpr uint64_t RECORD_ASSEMBLY_IDX_OFF = 0x78;
+constexpr uint64_t RECORD_ASSISTS_OFF = 0xf8;
+
 // Local player's current vehicle weight (kg), a plain float32. Resolved
 // through the hash registry to a "career-carstats-temp" object -- the same
 // per-car stats block that backs the Performance/Upgrades screen's stat

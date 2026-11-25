@@ -19,6 +19,7 @@ set(PURE_LOGIC_SOURCES
     ${CMAKE_SOURCE_DIR}/src/strings/Utf8.cpp
     ${CMAKE_SOURCE_DIR}/src/io/LogTrim.cpp
     ${CMAKE_SOURCE_DIR}/src/race/RaceEmitGate.cpp
+    ${CMAKE_SOURCE_DIR}/src/race/RaceRoster.cpp
     ${CMAKE_SOURCE_DIR}/src/race/GameMode.cpp
     ${DEPS_DIR}/lz4.c
 )

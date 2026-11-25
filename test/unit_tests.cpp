@@ -13,6 +13,7 @@
 #include "lz4.h"
 #include "race/GameMode.h"
 #include "race/RaceEmitGate.h"
+#include "race/RaceRoster.h"
 #include "strings/Utf8.h"
 #include "tuning/AssemblyTuning.h"
 #include "tuning/CarParts.h"
@@ -415,6 +416,46 @@ void TestGameMode() {
     Check(EliminationLapCount({Racer(2, 1), Racer(3, 0)}) == 0, "EliminationLapCount: 0 with no winner");
 }
 
+wreckfest_telemetry::PlayerResult Seen(const char* name, int laps, int totalMs, uint32_t status = 0,
+                                       bool local = false) {
+    wreckfest_telemetry::PlayerResult p;
+    p.name = name;
+    p.laps_completed = laps;
+    p.total_time_ms = totalMs;
+    p.status_flags = status;
+    p.is_local = local;
+    return p;
+}
+
+void TestRaceRoster() {
+    using namespace wreckfest_telemetry;
+    RaceRoster roster;
+    // Lobby/grid: named slots, clock not running yet.
+    Check(!roster.Observe({Seen("me", 1, 0, 0, true), Seen("quitter", 1, 0)}), "RaceRoster: lobby not tracked");
+    // Results screen of an earlier race: classified.
+    Check(!roster.Observe({Seen("old", 6, 300000, 0x41)}), "RaceRoster: classified leftovers not tracked");
+
+    Check(roster.Observe({Seen("me", 1, 5000, 0, true), Seen("quitter", 1, 5000), Seen("slow", 1, 5000)}),
+          "RaceRoster: racers added once the clock runs");
+    auto withCar = Seen("quitter", 1, 5000);
+    withCar.car = "Speedemon";
+    roster.SetCarInfo({withCar});
+    // Quitter DNFs, then their slot is wiped.
+    roster.Observe({Seen("me", 2, 60000, 0, true), Seen("quitter", 2, 61000, 0x13), Seen("slow", 2, 62000)});
+    roster.Observe({Seen("me", 3, 120000, 0, true), Seen("slow", 3, 125000)});
+
+    auto finalPresent = std::vector<PlayerResult>{Seen("me", 3, 120000, 0x41, true), Seen("slow", 3, 125000, 0x41)};
+    // "slow" is still in a slot but didn't make the ranked results -- not QUIT.
+    auto quit = roster.Missing({Seen("me", 3, 120000, 0x41, true)}, finalPresent);
+    Check(quit.size() == 1 && quit[0].name == "quitter", "RaceRoster: only the wiped racer is QUIT");
+    Check(quit.size() == 1 && quit[0].quit && quit[0].dnf() && quit[0].car == "Speedemon" && quit[0].laps_completed == 2,
+          "RaceRoster: QUIT keeps last-seen state and car info, flagged DNF");
+
+    // Local player's clock goes backwards: a new race, old roster dropped.
+    roster.Observe({Seen("me", 1, 0, 0, true)});
+    Check(roster.Missing({}, {}).empty(), "RaceRoster: restart starts a new roster");
+}
+
 }  // namespace
 
 int main() {
@@ -434,6 +475,7 @@ int main() {
     TestTrimToLastLines();
     TestRaceEmitGate();
     TestGameMode();
+    TestRaceRoster();
 
     if (g_failures == 0) {
         std::printf("all tests passed\n");

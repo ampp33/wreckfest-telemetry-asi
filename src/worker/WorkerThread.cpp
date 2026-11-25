@@ -17,12 +17,14 @@
 #include "io/Queue.h"
 #include "memory/ProcessMemory.h"
 #include "memory/SehGuard.h"
+#include "net/SupabaseClient.h"
 #include "race/CarNames.h"
 #include "race/GameMode.h"
 #include "race/LapSplits.h"
 #include "race/PlayerScraper.h"
 #include "race/RaceEmitGate.h"
 #include "race/RaceFinality.h"
+#include "race/RaceRoster.h"
 #include "strings/AssistSettings.h"
 #include "strings/HashRegistry.h"
 #include "strings/ServerName.h"
@@ -36,6 +38,8 @@ namespace {
 
 constexpr double kFlushBackoffSeconds[] = {60.0, 120.0, 300.0, 900.0};
 constexpr double kPollIntervalSeconds = 0.5;
+// The site treats a player as offline after 90s without one (3 missed pings).
+constexpr double kHeartbeatIntervalSeconds = 30.0;
 
 // Diagnostic builds only: log to debug_log.txt without needing debug.txt.
 // Keep false for releases.
@@ -47,6 +51,15 @@ constexpr bool kAlwaysDebugLog = false;
 // WinHTTP's redirect-following. FetchRemoteApiDefaults() degrades to an
 // empty result (API posting disabled for the run) if it can't be reached.
 const wchar_t kRemoteConfigUrl[] = L"https://wfracelog.com/plugin/config.default.json";
+
+void ApplyAssists(uintptr_t base, uintptr_t tableBase, std::vector<PlayerResult>& players) {
+    auto assistsBySlot = ReadAssistsBySlot(base, tableBase);
+    for (auto& p : players) {
+        if (p.ai == false && p.slot_index && assistsBySlot.count(*p.slot_index)) {
+            p.assists = assistsBySlot[*p.slot_index];
+        }
+    }
+}
 
 std::chrono::steady_clock::time_point SecondsFromNow(double seconds) {
     return std::chrono::steady_clock::now() +
@@ -86,9 +99,11 @@ struct WorkerLoopState {
     // occasionally mislabeling a real other racer as local.
     std::optional<std::string> confirmedLocalName;
     LapSplitTracker lapSplits;
+    RaceRoster roster;
     int flushBackoffIdx = 0;
     std::chrono::steady_clock::time_point nextFlushAt;
     int queuePending = 0;
+    std::chrono::steady_clock::time_point nextHeartbeatAt;  // epoch: first tick sends one
 };
 
 void EmitRace(const RaceResult& race, const std::wstring& logPath, const ApiConfig& apiConfig,
@@ -181,6 +196,16 @@ void RunOneTick(const PollContext& ctx, WorkerLoopState& state) {
     state.cachedAddrs = scrape.usedAddrs;
     if (!state.cachedAddrs) state.scanNeeded = true;
 
+    // A racer's car info is read as they join the race: if they quit, it's
+    // wiped long before results settle (see RaceRoster).
+    if (state.roster.Observe(scrape.present) && tableBase) {
+        auto present = scrape.present;
+        ResolveCarNames(ctx.base, *tableBase, present);
+        AssignRaceCars(present, ReadRaceCars(*tableBase));
+        ApplyAssists(ctx.base, *tableBase, present);
+        state.roster.SetCarInfo(present);
+    }
+
     auto& players = scrape.players;
     if (!players.empty()) {
         std::string fingerprint = ComputeFingerprint(players);
@@ -209,6 +234,7 @@ void RunOneTick(const PollContext& ctx, WorkerLoopState& state) {
         if (skipReason) {
             DebugLog((L"race skipped: " + WidenAscii(*skipReason)).c_str());
             state.emitGate.MarkEmitted(fingerprint);
+            state.roster.Clear();
         } else if (decision == RaceEmitGate::Decision::kEmit) {
             if (tableBase) {
                 ResolveCarNames(ctx.base, *tableBase, players);
@@ -249,6 +275,7 @@ void RunOneTick(const PollContext& ctx, WorkerLoopState& state) {
             // Tune screen).
             auto raceCars = ReadRaceCars(tableBase.value_or(0));
             AssignRaceCars(players, raceCars);
+            if (tableBase) ApplyAssists(ctx.base, *tableBase, players);
             std::map<std::string, int> tuning;
             if (local) {
                 auto carKey = tableBase ? LocalPlayerCarKey(*tableBase, true) : std::nullopt;
@@ -280,6 +307,15 @@ void RunOneTick(const PollContext& ctx, WorkerLoopState& state) {
             race.vehicle_weight_kg = vehicleWeightKg;
             race.server_name = serverName;
             race.players = players;
+            auto quit = state.roster.Missing(players, scrape.present);
+            state.lapSplits.Resolve(quit);
+            for (auto& p : quit) {
+                DebugLog((L"QUIT: '" + WidenAscii(p.name) + L"' left the race on lap " +
+                          std::to_wstring(p.laps_completed) + L" -- kept from earlier reads")
+                             .c_str());
+                p.position = static_cast<int>(race.players.size()) + 1;
+                race.players.push_back(std::move(p));
+            }
 
             bool identityTrusted = true;
             if (local) {
@@ -293,6 +329,7 @@ void RunOneTick(const PollContext& ctx, WorkerLoopState& state) {
             EmitRace(race, ctx.logPath, ctx.apiConfig, ctx.queuePath, ctx.deadPath, identityTrusted);
             AttemptQueueFlush(ctx, state);
             state.emitGate.MarkEmitted(fingerprint);
+            state.roster.Clear();
         }
     } else {
         state.emitGate.ObserveEmpty();
@@ -300,6 +337,13 @@ void RunOneTick(const PollContext& ctx, WorkerLoopState& state) {
 
     if (state.queuePending && std::chrono::steady_clock::now() >= state.nextFlushAt) {
         AttemptQueueFlush(ctx, state);
+    }
+
+    if (ApiConfigComplete(ctx.apiConfig) && !ctx.apiConfig.heartbeat_url.empty() &&
+        std::chrono::steady_clock::now() >= state.nextHeartbeatAt) {
+        state.nextHeartbeatAt = SecondsFromNow(kHeartbeatIntervalSeconds);
+        auto hb = PostHeartbeat(ctx.apiConfig);
+        if (!hb.ok) DebugLog((L"heartbeat failed: " + WidenAscii(hb.message)).c_str());
     }
 }
 
@@ -335,6 +379,7 @@ void RunPollLoop(HMODULE hModule) {
     RemoteApiDefaults remote = FetchRemoteApiDefaults(kRemoteConfigUrl);
     ctx.apiConfig.supabase_url = remote.supabase_url;
     ctx.apiConfig.supabase_anon_key = remote.supabase_anon_key;
+    ctx.apiConfig.heartbeat_url = remote.heartbeat_url;
     if (!ApiConfigComplete(ctx.apiConfig)) {
         DebugLog(L"API posting deferred this run: api-key.txt and/or remote config (wfracelog.com) unavailable "
                  L"-- races will be queued and sent on a future run once config loads");

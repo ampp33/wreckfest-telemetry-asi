@@ -66,6 +66,8 @@ nlohmann::json PlayerToDict(const PlayerResult& p, bool includeLaps) {
     if (auto tuning = TuningToApiFields(p.tuning)) d["tuning"] = *tuning;
     if (!p.parts.empty()) d["parts"] = PartsToJson(p.parts);
     if (p.ai) d["ai"] = *p.ai;
+    if (!p.assists.empty()) d["assists"] = p.assists;
+    if (p.quit) d["quit"] = true;
     if (includeLaps) {
         d["lap_times_ms"] = p.lap_times_ms;
         std::vector<std::string> laps;

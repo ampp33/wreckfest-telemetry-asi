@@ -39,6 +39,13 @@ struct PlayerResult {
     // couldn't be matched to their slot -- left out of the output rather
     // than guessed.
     std::optional<bool> ai;
+    // This racer's driving assists (same labels as RaceResult::assists),
+    // read per car -- see ReadAssistsBySlot. Empty for AI players and
+    // unresolved cars, left out of the output.
+    std::map<std::string, std::string> assists;
+    // Quit before results settled -- the game wipes their slot, so this
+    // entry is their last-seen state kept by RaceRoster. Also counts as DNF.
+    bool quit = false;
 
     bool dnf() const { return (status_flags & offsets::STATUS_DNF_BIT) != 0; }
 };

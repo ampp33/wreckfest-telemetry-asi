@@ -80,6 +80,9 @@ struct ScrapeResult {
     // idle/menu is normal; the array itself is a fixed per-race allocation
     // that stays valid for the process's lifetime).
     std::optional<std::vector<uintptr_t>> usedAddrs;
+    // Every occupied, named slot this tick, lap times valid or not, with
+    // is_local from CLIENT -- unranked, no positions. Feeds RaceRoster.
+    std::vector<PlayerResult> present;
 };
 
 // The full per-poll pipeline: slot discovery (cached addresses, or the

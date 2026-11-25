@@ -39,16 +39,16 @@ RemoteApiDefaults FetchRemoteApiDefaults(const std::wstring& url, double timeout
     HttpResult res = HttpGet(url, timeoutSeconds);
     if (!res.ok) return out;
 
-    nlohmann::json j;
+    // value() throws on a non-string field too, so it's inside the try.
     try {
-        j = nlohmann::json::parse(res.body);
+        nlohmann::json j = nlohmann::json::parse(res.body);
+        if (!j.is_object()) return out;
+        out.supabase_url = j.value("supabase_url", "");
+        out.supabase_anon_key = j.value("supabase_anon_key", "");
+        out.heartbeat_url = j.value("heartbeat_url", "");
     } catch (const nlohmann::json::exception&) {
-        return out;
+        return RemoteApiDefaults{};
     }
-    if (!j.is_object()) return out;
-
-    out.supabase_url = j.value("supabase_url", "");
-    out.supabase_anon_key = j.value("supabase_anon_key", "");
     return out;
 }
 
